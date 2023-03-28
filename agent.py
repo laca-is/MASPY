@@ -1,19 +1,18 @@
 from dataclasses import dataclass, field
 
-@dataclass(frozen=True, order=True)
+@dataclass
 class belief:
     key: str
     args: list = field(default_factory=list)  
     source: str = 'percept'
 
-@dataclass(frozen=True, order=True)
+@dataclass
 class ask:
-    key: str
-    args: list = field(default_factory=list) 
+    belief: belief 
     reply: list = field(default_factory=list) 
     source: str = 'unknown'
 
-@dataclass(frozen=True, order=True)
+@dataclass
 class plan:
     key: str
     args: list = field(default_factory=list)
@@ -44,6 +43,20 @@ class agent:
 
         print(f'{self.my_name}> Removing {belief}')
 
+    def print_beliefs(self):
+        for bel in self.beliefs:
+            print(bel)
+
+    def search_beliefs(self, bel, all=False):
+        found_beliefs = []
+        for belief in self.beliefs:
+            if belief.key == bel.key \
+            and len(belief.args) == len(bel.args):
+                found_beliefs.append(belief)
+                if not all:
+                    break
+        return found_beliefs
+    
     def run_plan(self, plan):
         print(f'{self.my_name}> Running {plan}')
         try:
@@ -53,15 +66,6 @@ class agent:
     
     def stop_plan(self, plan):
         pass
-
-    def search_beliefs(self, ask, all=False):
-        found_beliefs = []
-        for belief in self.beliefs:
-            if belief.key == ask.key \
-            and len(belief.args) == len(ask.key):
-                found_beliefs.append(belief)
-                if not all:
-                    return found_beliefs
 
     def recieve_msg(self, sender, act, msg: MSG):
         print(f'{self.my_name}> Received from {sender} : {act} -> {msg}')
@@ -79,11 +83,12 @@ class agent:
                 self.stop_plan(msg)
 
             case ("askOne", ask):
+                
                 found_beliefs = self.search_beliefs(ask)
                 self.prepare_msg(ask.source,'tell',found_beliefs[0])
 
             case ("askAll", ask):
-                found_beliefs = self.search_beliefs(ask,True)
+                found_beliefs = self.search_beliefs(ask.belief,True)
                 for bel in found_beliefs:
                     self.prepare_msg(ask.source,'tell',bel)
 
@@ -99,7 +104,12 @@ class agent:
             case _:
                 print(f"ERROR: Unknwon type of message {act} | {msg}")
 
-    def prepare_msg(self, target, act, msg):
+    def prepare_msg(self, target, act, msg: MSG):
+        msg.source = self.my_name
+        match (act, msg):
+            case ("askOne"|"askAll", belief):
+                msg = ask(msg,source=self.my_name)
+                
         print(f"{self.my_name}> Sending to {target} : {act} -> {msg}")
         self.send_msg(target, act, msg)
 
