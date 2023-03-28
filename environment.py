@@ -7,15 +7,18 @@ class env:
         self.agents = {}
         agent.send_msg = self.function_call(agent.send_msg)
 
-    def create_agent(self,name='agent_1'):
-        if name in self.agents:
-            aux = name.split('_')
-            name = (''.join(str(x) for x in aux[:-1]))\
+    def add_agents(self, agent_list):
+        for agent in agent_list:
+            self.add_agent(agent)
+
+    def add_agent(self, agent):
+        if agent.my_name in self.agents:
+            aux = agent.my_name.split('_')
+            agent.my_name = (''.join(str(x) for x in aux[:-1]))\
                     +'_'+str(int(aux[-1])+1)
             pass
-        ag = agent(name)
-        self.agents[name] = ag
-        return ag 
+        self.agents[agent.my_name] = agent
+        print(f'Env> Adding agent {agent.my_name} to list')
 
     def function_call(self, func):
         @wraps(func)

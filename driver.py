@@ -1,6 +1,12 @@
-import agent as agt
+from agent import agent
 
-class driver:
-    def __init__(self) -> None:
-        print('Hello')
+class driver(agent):
+    def __init__(self, name) -> None:
+        super().__init__(name)
+        
+    
+    def converser(self):
+        pass
+
+
 

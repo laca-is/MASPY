@@ -1,18 +1,20 @@
 import environment as envrmt
 import agent as agt
-import driver
+from driver import driver
 
 def main():
     env = envrmt.env()
-    ag = env.create_agent('ag1')
-    ag2 = env.create_agent('ag2')
+    drv1 = driver('drv_1')
+    drv2 = driver('drv_1')
+    env.add_agents([drv1,drv2])
     
-    ag.add_belief(agt.belief('a',['b']))
-    ag.prepare_msg('ag2','tell',agt.belief('crenc',['first']))
-    ag.prepare_msg('ag2','tell',agt.belief('crenc',['second']))
-    #ag2.prepare_msg('ag1','achieve',agt.plan('print',[1,2]))
-    ag2.print_beliefs()
-    ag.prepare_msg('ag2','askAll',agt.belief('crenc',['A']))
+    drv1.add_belief(agt.belief('a',['b']))
+    drv1.prepare_msg('drv_2','tell',agt.belief('crenc',['first']))
+    
+    drv1.prepare_msg('drv_2','tell',agt.belief('crenc',['second']))
+
+    drv2.print_beliefs()
+    drv1.prepare_msg('drv_2','askAll',agt.belief('crenc',['A']))
     print("END")
 
 if __name__ == "__main__":
