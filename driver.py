@@ -1,7 +1,6 @@
 import agent as agt
 
-def setup_agent():
-    pass
-    
-setup_agent()
+class driver:
+    def __init__(self) -> None:
+        pass
 
