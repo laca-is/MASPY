@@ -6,10 +6,12 @@ def main():
     ag = env.create_agent('ag1')
     ag2 = env.create_agent('ag2')
     
-    ag.add_belief(agt.belief('a','b'))
-    ag.prepare_msg('ag2','tell',agt.belief('crenc','teste',ag.my_name))
-    ag2.prepare_msg('ag1','achieve',agt.plan('print',[1,2],ag2.my_name))
-    ag.prepare_msg('ag2','askOne',agt.ask('crenc','',ag.my_name))
+    #ag.add_belief(agt.belief('a','b'))
+    ag.prepare_msg('ag2','tell',agt.belief('crenc','first'))
+    ag.prepare_msg('ag2','tell',agt.belief('crenc','second'))
+    #ag2.prepare_msg('ag1','achieve',agt.plan('print',[1,2]))
+    ag2.print_beliefs()
+    ag.prepare_msg('ag2','askAll',agt.belief('crenc','A'))
     print("END")
 
 if __name__ == "__main__":
