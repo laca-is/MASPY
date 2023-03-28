@@ -83,8 +83,7 @@ class agent:
                 self.stop_plan(msg)
 
             case ("askOne", ask):
-                
-                found_beliefs = self.search_beliefs(ask)
+                found_beliefs = self.search_beliefs(ask.belief)
                 self.prepare_msg(ask.source,'tell',found_beliefs[0])
 
             case ("askAll", ask):
