@@ -6,7 +6,7 @@ def main():
     ag = env.create_agent('ag1')
     ag2 = env.create_agent('ag2')
     
-    #ag.add_belief(agt.belief('a','b'))
+    ag.add_belief(agt.belief('a','b'))
     ag.prepare_msg('ag2','tell',agt.belief('crenc','first'))
     ag.prepare_msg('ag2','tell',agt.belief('crenc','second'))
     #ag2.prepare_msg('ag1','achieve',agt.plan('print',[1,2]))

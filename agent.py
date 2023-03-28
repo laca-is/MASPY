@@ -44,8 +44,8 @@ class agent:
         print(f'{self.my_name}> Removing {belief}')
 
     def print_beliefs(self):
-        for bel in self.beliefs:
-            print(bel)
+        for belief in self.beliefs:
+            print(belief)
 
     def search_beliefs(self, bel, all=False):
         found_beliefs = []
