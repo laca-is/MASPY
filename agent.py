@@ -22,13 +22,12 @@ class plan:
 MSG = belief | ask | plan
 
 class agent:
-    def __init__(self, name) -> None:
+    def __init__(self, name, beliefs = [], objetives = [], plans = {}) -> None:
         self.my_name = name
-        self.beliefs = []
-        self.plans = {
-            'test' : lambda a,b,c : agent.test(a,b,c), 
-            'print' : lambda a,b : agent.print(a,b)
-        }
+        self.beliefs = beliefs
+        self.objetives = objetives
+        self.plans = {'start_agent' : lambda s : self.start_agent(s)}
+        self.plans.update(plans)
 
         print(f'{name}> Initialized')
     
@@ -115,12 +114,10 @@ class agent:
     def send_msg(self, target, act, msg):
         pass
 
+    
     @staticmethod
-    def test(a,b,c):
-        print(f'{a} {b} {c}')
-
-    @staticmethod
-    def print(a,b):
-        print(f'Printing vars {a} {b}')
-
+    def start_agent(self):
+        print(f'{self.my_name} Started')
+        for objective in self.objectives:
+            self.recieve_msg(self.my_name,'achieve',)
 
