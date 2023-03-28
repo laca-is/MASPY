@@ -82,7 +82,7 @@ class agent:
                 found_beliefs = self.search_beliefs(ask)
                 self.prepare_msg(ask.source,'tell',found_beliefs[0])
 
-            case ("askAll", belief):
+            case ("askAll", ask):
                 found_beliefs = self.search_beliefs(ask,True)
                 for bel in found_beliefs:
                     self.prepare_msg(ask.source,'tell',bel)
