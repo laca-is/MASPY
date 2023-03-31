@@ -22,10 +22,10 @@ class plan:
 MSG = belief | ask | plan
 
 class agent:
-    def __init__(self, name, beliefs = [], objetives = [], plans = {}) -> None:
+    def __init__(self, name, beliefs = [], objectives = [], plans = {}) -> None:
         self.my_name = name
         self.beliefs = beliefs
-        self.objetives = objetives
+        self.objectives = objectives
         self.plans = {'start_agent' : lambda s : self.start_agent(s)}
         self.plans.update(plans)
 
@@ -119,5 +119,5 @@ class agent:
     def start_agent(self):
         print(f'{self.my_name} Started')
         for objective in self.objectives:
-            self.recieve_msg(self.my_name,'achieve',)
+            self.recieve_msg(self.my_name,'achieve',objective)
 

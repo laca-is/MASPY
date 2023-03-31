@@ -4,10 +4,11 @@ from driver import driver
 
 def main():
     env = envrmt.env()
-    drv1 = driver('drv_1')
-    drv2 = driver('drv_1')
+    drv1 = driver('drv')
+    drv2 = driver('drv')
     env.add_agents([drv1,drv2])
     
+    env.add_agent(driver('drv'))
     drv1.recieve_msg(drv1.my_name,'achieve',agt.plan('start_agent',[drv1]))
 
 
