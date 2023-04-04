@@ -14,14 +14,12 @@ class ask:
     source: str = 'unknown'
 
 @dataclass
-class plan:
+class objective:
     key: str
-    body: Callable
     args: list = field(default_factory=list)
     source: str = 'percept'
 
-
-MSG = belief | ask | plan
+MSG = belief | ask | objective
 
 class agent:
     def __init__(self, name, beliefs = [], objectives = [], plans = {}) -> None:
@@ -31,21 +29,22 @@ class agent:
         self.plans = {'reasoning' : lambda s : self.reasoning(s)}
         self.plans.update(plans)
 
-        plan.body = lambda : self.reason()
-        plan.body()
-
+        self.stop_agent = False
         print(f'{name}> Initialized')
     
     def add_belief(self, belief):
         if belief not in self.beliefs:
             self.beliefs.append(belief)
 
-        print(f'{self.my_name}> Adding {belief}')
-
     def rm_belief(self, belief):
         self.beliefs.remove(belief)
 
-        print(f'{self.my_name}> Removing {belief}')
+    def add_objective(self, objective):
+        if objective not in self.objectives:
+            self.objectives.append(objective)
+
+    def rm_objective(self, objective):
+        self.objectives.remove(objective)
 
     def print_beliefs(self):
         for belief in self.beliefs:
@@ -70,7 +69,7 @@ class agent:
         except(TypeError, KeyError):
             print(f"Plan {plan} doesn't exist")
             raise RuntimeError #TODO: Define New error or better error
-    
+
     def stop_plan(self, plan):
         pass
 
@@ -78,17 +77,20 @@ class agent:
         print(f'{self.my_name}> Received from {sender} : {act} -> {msg}')
         match (act, msg):
             case ("tell", belief): 
-                self.add_belief(msg)
+                self.add_belief(belief)
+                print(f'{self.my_name}> Adding {belief}')
 
             case ("untell", belief): 
-                self.rm_belief(msg)
+                self.rm_belief(belief)
+                print(f'{self.my_name}> Removing {belief}')
 
-            case ("achieve", plan):
-                self.add_objetive()
-                return self.run_plan(msg)
+            case ("achieve", objective):
+                self.add_objective(objective)
+                print(f'{self.my_name}> Adding {objective}')
 
-            case ("unachieve", plan):
-                self.stop_plan(msg)
+            case ("unachieve", objective):
+                self.stop_plan(objective)
+                print(f'{self.my_name}> Removing {objective}')
 
             case ("askOne", ask):
                 found_belief = self.search_beliefs(ask.belief)
@@ -124,20 +126,24 @@ class agent:
         pass
 
     @staticmethod
-    def reason():
-        print('HI')
-
-    @staticmethod
     def reasoning(self):
-        pass
-        # print(f'{self.my_name} Started')
-        # self.perception()
-        # self.execution()
-    
-    def executuion(self):
-        result = self.recieve_msg(self.my_name,'achieve',self.objectives[-1])
-        
+        while not self.stop_agent:
+            self.perception()
+            self.execution()
             
-
     def perception(self):
         pass
+
+    def execution(self):
+        if not self.objectives:
+            return None
+        objective = self.objectives[-1]
+        print(f"{self.my_name}> Execution {objective}")
+        try:
+            result = self.run_plan(objective)
+            self.rm_objective(objective)
+        except(RuntimeError):
+            print(f"{self.my_name}> {objective} failed")
+
+    def done(self):
+        self.stop_agent = True
