@@ -5,9 +5,9 @@ from driver import driver
 def main():
     env = envrmt.env()
     drv1 = driver('dr#v')
-    #drv2 = driver('dr#v')
-    #env.add_agents([drv1,drv2])
-    
+    drv2 = driver('dr#v')
+    env.add_agents([drv1,drv2])
+    env.start_all_agents()
     #env.add_agent(driver('drv'))
     #drv1.recieve_msg(drv1.my_name,'achieve',agt.plan('reason',[drv1]))
 

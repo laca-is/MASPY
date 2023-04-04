@@ -24,6 +24,18 @@ class env:
         self.agents[agent.my_name] = agent
         print(f'Env> Adding agent {agent.my_name} to list')
 
+    def start_all_agents(self):
+        for agent_name in self.agents:
+            self.start_agent(agent_name)
+    
+    def start_agents(self, agents):
+        for agent_name in agents:
+            self.start_agent(agent_name)
+
+    def start_agent(self,agent_name):
+        agent = self.agents[agent_name]
+        agent.plans['reasoning'](agent)
+
     def function_call(self, func):
         @wraps(func)
         def wrapper(*args, **kwargs):

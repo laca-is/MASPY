@@ -89,7 +89,7 @@ class agent:
                 print(f'{self.my_name}> Adding {objective}')
 
             case ("unachieve", objective):
-                self.stop_plan(objective)
+                self.rm_objective(objective)
                 print(f'{self.my_name}> Removing {objective}')
 
             case ("askOne", ask):
@@ -130,6 +130,7 @@ class agent:
         while not self.stop_agent:
             self.perception()
             self.execution()
+            self.done()
             
     def perception(self):
         pass
@@ -141,7 +142,9 @@ class agent:
         print(f"{self.my_name}> Execution {objective}")
         try:
             result = self.run_plan(objective)
-            self.rm_objective(objective)
+            if objective in self.objectives:
+                self.rm_objective(objective)
+
         except(RuntimeError):
             print(f"{self.my_name}> {objective} failed")
 
