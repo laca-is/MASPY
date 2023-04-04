@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from collections.abc import Callable
 
 @dataclass
 class belief:
@@ -15,6 +16,7 @@ class ask:
 @dataclass
 class plan:
     key: str
+    body: Callable
     args: list = field(default_factory=list)
     source: str = 'percept'
 
@@ -26,8 +28,11 @@ class agent:
         self.my_name = name
         self.beliefs = beliefs
         self.objectives = objectives
-        self.plans = {'start_agent' : lambda s : self.start_agent(s)}
+        self.plans = {'reasoning' : lambda s : self.reasoning(s)}
         self.plans.update(plans)
+
+        plan.body = lambda : self.reason()
+        plan.body()
 
         print(f'{name}> Initialized')
     
@@ -51,17 +56,20 @@ class agent:
         for belief in self.beliefs:
             if belief.key == bel.key \
             and len(belief.args) == len(bel.args):
-                found_beliefs.append(belief)
                 if not all:
+                    found_beliefs = belief
                     break
+                else:
+                    found_beliefs.append(belief)
         return found_beliefs
     
     def run_plan(self, plan):
         print(f'{self.my_name}> Running {plan}')
         try:
-            self.plans[plan.key](*plan.args)
-        except(TypeError):
+            return self.plans[plan.key](*plan.args)
+        except(TypeError, KeyError):
             print(f"Plan {plan} doesn't exist")
+            raise RuntimeError #TODO: Define New error or better error
     
     def stop_plan(self, plan):
         pass
@@ -76,14 +84,15 @@ class agent:
                 self.rm_belief(msg)
 
             case ("achieve", plan):
-                self.run_plan(msg)
+                self.add_objetive()
+                return self.run_plan(msg)
 
             case ("unachieve", plan):
                 self.stop_plan(msg)
 
             case ("askOne", ask):
-                found_beliefs = self.search_beliefs(ask.belief)
-                self.prepare_msg(ask.source,'tell',found_beliefs[0])
+                found_belief = self.search_beliefs(ask.belief)
+                self.prepare_msg(ask.source,'tell',found_belief)
 
             case ("askAll", ask):
                 found_beliefs = self.search_beliefs(ask.belief,True)
@@ -114,10 +123,21 @@ class agent:
     def send_msg(self, target, act, msg):
         pass
 
-    
     @staticmethod
-    def start_agent(self):
-        print(f'{self.my_name} Started')
-        for objective in self.objectives:
-            self.recieve_msg(self.my_name,'achieve',objective)
+    def reason():
+        print('HI')
 
+    @staticmethod
+    def reasoning(self):
+        pass
+        # print(f'{self.my_name} Started')
+        # self.perception()
+        # self.execution()
+    
+    def executuion(self):
+        result = self.recieve_msg(self.my_name,'achieve',self.objectives[-1])
+        
+            
+
+    def perception(self):
+        pass

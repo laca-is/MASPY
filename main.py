@@ -4,12 +4,12 @@ from driver import driver
 
 def main():
     env = envrmt.env()
-    drv1 = driver('drv')
-    drv2 = driver('drv')
-    env.add_agents([drv1,drv2])
+    drv1 = driver('dr#v')
+    #drv2 = driver('dr#v')
+    #env.add_agents([drv1,drv2])
     
-    env.add_agent(driver('drv'))
-    drv1.recieve_msg(drv1.my_name,'achieve',agt.plan('start_agent',[drv1]))
+    #env.add_agent(driver('drv'))
+    #drv1.recieve_msg(drv1.my_name,'achieve',agt.plan('reason',[drv1]))
 
 
     # drv1.add_belief(agt.belief('a',['b']))

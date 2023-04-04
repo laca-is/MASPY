@@ -13,15 +13,13 @@ class env:
             self.add_agent(agent)
 
     def add_agent(self, agent):
-        agent.my_name = f'{agent.my_name}#{random.randint(1000,9999)}'
+        agent.my_name = f'{agent.my_name}#{random.randint(1000,9999)}' 
         if agent.my_name in self.agents:
             aux = agent.my_name.split('#')
-            while f'{agent.my_name}{count}' in self.agents:
-                count += 1
-            agent.my_name = f'{agent.my_name}{count}'
-            #aux = agent.my_name.split('_') 
-            #agent.my_name = (''.join(str(x) for x in aux[:-1]))\
-            #        +'_'+str(int(aux[-1])+1)
+            while "#".join(aux) in self.agents:
+                aux[-1] = str(random.randint(1000,9999))
+                
+            agent.my_name = '#'.join(aux) 
 
         self.agents[agent.my_name] = agent
         print(f'Env> Adding agent {agent.my_name} to list')
