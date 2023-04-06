@@ -13,10 +13,9 @@ class driver(agent):
     
     def consider_price(agt,src,price):
         print(f"{agt.my_name}> Considering price: {price} from {src}")
-        bel = agt.search_beliefs(belief('price',['P']))
-        my_price = bel.args[0]
+        my_price = agt.search_beliefs(belief('price',['P'])).args[0]
         if price <= my_price:
-            print('Accept price')
+            print(f'{agt.my_name}> Accept price')
         else:
             print(f'{agt.my_name}> Reject Price')
             agt.prepare_msg(src,'achieve',objective('consider_price',[int((price+my_price)/2)]))

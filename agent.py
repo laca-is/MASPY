@@ -29,7 +29,7 @@ class agent:
         self.plans = {'reasoning' : lambda s : self.reasoning(s)}
         self.plans.update(plans)
 
-        self.stop_agent = False
+        self.paused_agent = False
         print(f'{name}> Initialized')
     
     def add_belief(self, belief):
@@ -42,7 +42,7 @@ class agent:
     def add_objective(self, objective):
         if objective not in self.objectives:
             self.objectives.append(objective)
-            
+
             if self.paused_agent:
                 self.paused_agent = False
                 self.plans['reasoning'](self)
