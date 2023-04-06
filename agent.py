@@ -28,7 +28,7 @@ class agent:
         self.objectives = objectives
         self.plans = {'reasoning' : lambda s : self.reasoning(s)}
         self.plans.update(plans)
-
+        
         self.paused_agent = False
         print(f'{name}> Initialized')
     

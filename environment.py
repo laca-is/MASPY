@@ -4,7 +4,8 @@ from functools import wraps
 from agent import agent
 
 class env:
-    def __init__(self) -> None:
+    def __init__(self, env_name='Env') -> None:
+        self.env_name = env_name
         self.agents = {}
         agent.send_msg = self.function_call(agent.send_msg)
 
@@ -22,13 +23,15 @@ class env:
             agent.my_name = '#'.join(aux) 
 
         self.agents[agent.my_name] = agent
-        print(f'Env> Adding agent {agent.my_name} to list')
+        print(f'{self.env_name}> Connecting agent {agent.my_name} to environment')
 
     def start_all_agents(self):
+        print(f'{self.env_name}> Starting all connected agents')
         for agent_name in self.agents:
             self.start_agent(agent_name)
     
     def start_agents(self, agents):
+        print(f'{self.env_name}> Starting listed agents')
         for agent_name in agents:
             self.start_agent(agent_name)
 
