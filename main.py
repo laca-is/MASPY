@@ -4,10 +4,11 @@ from driver import driver
 
 def main():
     env = envrmt.env()
-    drv1 = driver('dr#v')
-    drv2 = driver('dr#v')
+    drv1 = driver('drv1', [agt.belief('price',[10])], objectives = [agt.objective('offer')])
+    drv2 = driver('drv2', [agt.belief('price',[10])])
     env.add_agents([drv1,drv2])
     env.start_all_agents()
+
     #env.add_agent(driver('drv'))
     #drv1.recieve_msg(drv1.my_name,'achieve',agt.plan('reason',[drv1]))
 

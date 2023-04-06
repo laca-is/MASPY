@@ -13,7 +13,7 @@ class env:
             self.add_agent(agent)
 
     def add_agent(self, agent):
-        agent.my_name = f'{agent.my_name}#{random.randint(1000,9999)}' 
+        #agent.my_name = f'{agent.my_name}#{random.randint(1000,9999)}' 
         if agent.my_name in self.agents:
             aux = agent.my_name.split('#')
             while "#".join(aux) in self.agents:
@@ -35,6 +35,9 @@ class env:
     def start_agent(self,agent_name):
         agent = self.agents[agent_name]
         agent.plans['reasoning'](agent)
+
+    def get_connected_agents():
+        pass
 
     def function_call(self, func):
         @wraps(func)

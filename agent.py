@@ -42,6 +42,10 @@ class agent:
     def add_objective(self, objective):
         if objective not in self.objectives:
             self.objectives.append(objective)
+            
+            if self.paused_agent:
+                self.paused_agent = False
+                self.plans['reasoning'](self)
 
     def rm_objective(self, objective):
         self.objectives.remove(objective)
@@ -56,8 +60,7 @@ class agent:
             if belief.key == bel.key \
             and len(belief.args) == len(bel.args):
                 if not all:
-                    found_beliefs = belief
-                    break
+                    return belief
                 else:
                     found_beliefs.append(belief)
         return found_beliefs
@@ -65,7 +68,7 @@ class agent:
     def run_plan(self, plan):
         print(f'{self.my_name}> Running {plan}')
         try:
-            return self.plans[plan.key](*plan.args)
+            return self.plans[plan.key](plan.source, *plan.args)
         except(TypeError, KeyError):
             print(f"Plan {plan} doesn't exist")
             raise RuntimeError #TODO: Define New error or better error
@@ -127,10 +130,10 @@ class agent:
 
     @staticmethod
     def reasoning(self):
-        while not self.stop_agent:
+        while self.objectives:
             self.perception()
             self.execution()
-            self.done()
+        self.paused_agent = True
             
     def perception(self):
         pass
@@ -148,5 +151,3 @@ class agent:
         except(RuntimeError):
             print(f"{self.my_name}> {objective} failed")
 
-    def done(self):
-        self.stop_agent = True
