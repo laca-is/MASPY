@@ -34,8 +34,8 @@ class agent:
         self.my_name = name
         self.__beliefs = beliefs
         self.__objectives = objectives
-        self._plans = plans
-        self._plans.update({'reasoning' : lambda : self.reasoning()})
+        self.__plans = plans
+        self.__plans.update({'reasoning' : lambda : self.reasoning()})
         
         self.paused_agent = False
         print(f'{name}> Initialized')
@@ -55,7 +55,7 @@ class agent:
             
             if self.paused_agent:
                 self.paused_agent = False
-                self._plans['reasoning'](self)
+                self.__plans['reasoning'](self)
 
     def rm_objective(self, objective):
         self.__objectives.remove(objective)
@@ -64,10 +64,10 @@ class agent:
         assert type(plan) == dict
         for funcs in plan.values():
             assert callable(funcs)
-        self._plans.update(plan)
+        self.__plans.update(plan)
     
     def rm_plan(self, plan):
-        del(self._plans[plan.key])
+        del(self.__plans[plan.key])
 
     def print_beliefs(self):
         for belief in self.__beliefs:
@@ -88,7 +88,7 @@ class agent:
         sleep(0.2)
         print(f"{self.my_name}> Running plan(key='{plan.key}', args={plan.args}, source={plan.source})")
         try:
-            return self._plans[plan.key](self, plan.source, *plan.args)
+            return self.__plans[plan.key](self, plan.source, *plan.args)
         except(TypeError, KeyError):
             print(f"Plan {plan} doesn't exist")
             raise RuntimeError #TODO: Define New error or better error
