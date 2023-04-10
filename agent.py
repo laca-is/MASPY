@@ -22,12 +22,11 @@ class objective:
 MSG = belief | ask | objective
 
 class agent:
-    def __init__(self, name, beliefs = [], objectives = [], plans = {}) -> None:
+    def __init__(self, name, beliefs = [], objectives = []) -> None:
         self.my_name = name
         self.beliefs = beliefs
         self.objectives = objectives
         self.plans = {'reasoning' : lambda s : self.reasoning(s)}
-        self.plans.update(plans)
         
         self.paused_agent = False
         print(f'{name}> Initialized')
@@ -40,9 +39,10 @@ class agent:
         self.beliefs.remove(belief)
 
     def add_objective(self, objective):
+        print(f'{self.my_name}> my objectives {self.objectives}')
         if objective not in self.objectives:
             self.objectives.append(objective)
-
+            
             if self.paused_agent:
                 self.paused_agent = False
                 self.plans['reasoning'](self)
@@ -66,9 +66,9 @@ class agent:
         return found_beliefs
     
     def run_plan(self, plan):
-        print(f'{self.my_name}> Running {plan}')
+        print(f"{self.my_name}> Running plan(key='{plan.key}', args={plan.args}, source={plan.source})")
         try:
-            return self.plans[plan.key](plan.source, *plan.args)
+            return self.plans[plan.key](self, plan.source, *plan.args)
         except(TypeError, KeyError):
             print(f"Plan {plan} doesn't exist")
             raise RuntimeError #TODO: Define New error or better error
@@ -77,12 +77,17 @@ class agent:
         pass
 
     def recieve_msg(self, sender, act, msg: MSG):
-        print(f'{self.my_name}> Received from {sender} : {act} -> {msg}')
+        if not act == 'env_tell':
+            print(f'{self.my_name}> Received from {sender} : {act} -> {msg}')
         match (act, msg):
             case ("tell", belief): 
                 self.add_belief(belief)
                 print(f'{self.my_name}> Adding {belief}')
 
+            case ("env_tell", belief): 
+                self.add_belief(belief)
+                print(f'{self.my_name}> Adding Env Belief')
+            
             case ("untell", belief): 
                 self.rm_belief(belief)
                 print(f'{self.my_name}> Removing {belief}')

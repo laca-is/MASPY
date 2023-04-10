@@ -1,24 +1,32 @@
 from agent import agent, belief, ask, objective
 
 class driver(agent):
-    def __init__(self, name, beliefs = [], objectives = []) -> None:
-        plans = {'offer': lambda src: driver.offer(self,src),
-                 'consider_price': lambda src, p : driver.consider_price(self,src,p)}
-        super().__init__(name, beliefs, objectives, plans)
-
-    def offer(agt,src):
-        print(f"{agt.my_name}> Offering 20")
-        agt.prepare_msg('drv2','achieve',objective('consider_price',[20]))
+    def __init__(self, name, beliefs = [], objectives = [], plans = {}) -> None:
+        super().__init__(name, beliefs, objectives)
+        self.beliefs = beliefs.copy()
+        self.objectives = objectives.copy()
+        self.plans.update({'offer': lambda self,src: driver.offer(self,src),
+                        'consider_price': lambda self,src, p : driver.consider_price(self,src,p)})
+        self.plans.update(plans)
     
-    def consider_price(agt,src,price):
-        print(f"{agt.my_name}> Considering price: {price} from {src}")
-        my_price = agt.search_beliefs(belief('price',['P'])).args[0]
-        if price <= my_price:
-            print(f'{agt.my_name}> Accept price')
-        else:
-            print(f'{agt.my_name}> Reject Price')
-            agt.prepare_msg(src,'achieve',objective('consider_price',[int((price+my_price)/2)]))
-
+    def offer(self,src):
+        agents = self.search_beliefs(belief('Agents',['A'])).args[0]
+        print(f"{self.my_name}> Offering 20 to all drivers")
+        for agent_name in agents:
+            if self.my_name != agent_name and agents[agent_name] == 'driver':
+                self.prepare_msg(agent_name,'achieve',objective('consider_price',[20]))
+    
+    def consider_price(self,src,price):
+        print(f"{self.my_name}> Considering price: {price} from {src}")
+        try:
+            my_price = self.search_beliefs(belief('price',['P'])).args[0]
+            if price <= my_price:
+                print(f'{self.my_name}> Accept price')
+            else:
+                print(f'{self.my_name}> Reject Price')
+                self.prepare_msg(src,'achieve',objective('consider_price',[int((price+my_price)/2)]))
+        except(AttributeError):
+            print(f'{self.my_name}> I don\'t have a price')
 
 
 
