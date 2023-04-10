@@ -84,7 +84,7 @@ class agent:
                     found_beliefs.append(belief)
         return found_beliefs
     
-    def run_plan(self, plan):
+    def __run_plan(self, plan):
         sleep(0.2)
         print(f"{self.my_name}> Running plan(key='{plan.key}', args={plan.args}, source={plan.source})")
         try:
@@ -93,7 +93,7 @@ class agent:
             print(f"Plan {plan} doesn't exist")
             raise RuntimeError #TODO: Define New error or better error
 
-    def stop_plan(self, plan):
+    def __stop_plan(self, plan):
         pass
 
     def recieve_msg(self, sender, act, msg: MSG):
@@ -168,7 +168,7 @@ class agent:
         objective = self.__objectives[-1]
         print(f"{self.my_name}> Execution {objective}")
         try:
-            result = self.run_plan(objective)
+            result = self.__run_plan(objective)
             if objective in self.__objectives:
                 self.rm_objective(objective)
 
