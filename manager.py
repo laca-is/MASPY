@@ -1,5 +1,5 @@
-from agent import agent, belief, ask, objective
+from agent import agent, Belief, Ask, Objective
 
 class manager(agent):
-    def __init__(self, name, beliefs = [], objectives = []) -> None:
-        super().__init__(name, beliefs, objectives)
+    def __init__(self, name, beliefs = [], objectives = [], plans = {}) -> None:
+        super().__init__(name, beliefs, objectives, plans)

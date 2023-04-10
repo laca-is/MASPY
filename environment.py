@@ -1,7 +1,7 @@
 import inspect
 import random
 from functools import wraps
-from agent import agent, belief, ask, objective
+from agent import agent, Belief, Ask, Objective
 
 class env:
     def __init__(self, env_name='Env') -> None:
@@ -30,22 +30,21 @@ class env:
         self.send_agents_list()
         print(f'{self.env_name}> Starting all connected agents')
         for agent_name in self.agents:
-            self.start_agent(agent_name)
+            self._start_agent(agent_name)
     
     def start_agents(self, agents):
         self.send_agents_list()
         print(f'{self.env_name}> Starting listed agents')
         for agent_name in agents:
-            self.start_agent(agent_name)
+            self._start_agent(agent_name)
 
-    def start_agent(self,agent_name):
+    def _start_agent(self,agent_name):
         agent = self.agents[agent_name]
-        agent.plans['reasoning'](agent)
+        agent.reasoning()
 
     def send_agents_list(self):
-        names = self.agents.keys()
         for agent_name in self.agents:
-            self.agents[agent_name].recieve_msg(agent_name,'env_tell',belief('Agents',[self.agent_list]))
+            self.agents[agent_name].recieve_msg(agent_name,'env_tell',Belief('Agents',[self.agent_list]))
             
     def function_call(self, func):
         @wraps(func)
