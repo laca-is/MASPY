@@ -26,13 +26,18 @@ class env:
         self.__agents[agent.my_name] = agent
         print(f'{self.env_name}> Connecting agent {type(agent).__name__}:{agent.my_name} to environment')
 
-    def rm_agents(self, agent_list):
-        for agent in agent_list:
-            self.rm_agent(agent)
+    def rm_agents(self, agents):
+        if iter(agents):
+            for agent in agents:
+                self.__rm_agent(agent)
+        else:
+            self.__rm_agent(agents)
+        self.send_agents_list()
     
-    def rm_agent(self, agent):
+    def __rm_agent(self, agent):
         if agent.my_name in self.__agents:
             del(self.__agents[agent.my_name])
+            del(self.__agent_list[agent.my_name])
         print(f'{self.env_name}> Desconnecting agent {type(agent).__name__}:{agent.my_name} from environment')
     
     def start_all_agents(self):
