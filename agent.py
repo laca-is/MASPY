@@ -90,10 +90,11 @@ class agent:
         try:
             return self.__plans[plan.key](self, plan.source, *plan.args)
         except(TypeError, KeyError):
-            print(f"Plan {plan} doesn't exist")
+            print(f"{self.my_name}> Plan {plan} doesn't exist")
             raise RuntimeError #TODO: Define New error or better error
 
     def __stop_plan(self, plan):
+        print(f"{self.my_name}> Stoping plan(key='{plan.key}', args={plan.args}, source={plan.source})")
         pass
 
     def recieve_msg(self, sender, act, msg: MSG):
