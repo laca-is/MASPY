@@ -27,10 +27,10 @@ class env:
         print(f'{self.env_name}> Connecting agent {type(agent).__name__}:{agent.my_name} to environment')
 
     def rm_agents(self, agents):
-        if iter(agents):
+        try:
             for agent in agents:
                 self.__rm_agent(agent)
-        else:
+        except(TypeError):
             self.__rm_agent(agents)
         self.send_agents_list()
     

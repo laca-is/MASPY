@@ -10,6 +10,8 @@ def main():
     drv4 = driver('drv3', [Belief('price',[20])])
     mgr = manager('mgr')
     env.add_agents([drv1,drv2,drv4,mgr])
+    env.rm_agents(mgr)
+    return
     env.start_all_agents()
 
     print("END")
