@@ -3,8 +3,8 @@ import random
 from functools import wraps
 from agent import agent, Belief, Ask, Objective
 
-class env:
-    def __init__(self, env_name='Env') -> None:
+class comms:
+    def __init__(self, env_name='Comm') -> None:
         self.env_name = env_name
         self.__started_agents = []
         self.__agent_list = {}
