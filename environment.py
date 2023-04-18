@@ -15,16 +15,27 @@ Get perception:
 
 '''
 
-#attributes = { 'gerente' : {'vagas' : [['A1', True],['A2',False]], 'catraca': 'open'} ,
-#         'motorista' : { {},{} }, 
-#         'any' : {'time' : 2023} }
-
 class env:
     def __init__(self) -> None:
-        self.__caracteristics = {'any' : {}}
+        self.__caracteristics = {'any' : {'a' : 10}}
+        self.__roles = ['any']
 
-    def add_caracteristic(self, name, structure, role='any'):
-        print('hue')
-        self.__caracteristics[role].update({name : structure})
+    def add_role(self, role_name):
+        self.__roles.append(role_name)
 
-    #def get_caracteristics(self, name, role):
+    def add_caracteristic(self, name, data, role='any'):
+        try: 
+            self.__caracteristics[role][name].update(data)
+        except(KeyError):
+            try:
+                self.__caracteristics[role][name] = data
+            except(KeyError):
+                self.__caracteristics[role] = {name : data}
+
+    def get_caracteristics(self, agent_role=None):
+        found_caractersitics = {}
+        for role in self.__roles:
+            if role == agent_role or role == 'any' or agent_role == 'all':
+                for caracteristic in self.__caracteristics[role]:
+                    found_caractersitics[caracteristic] = self.__caracteristics[role][caracteristic]
+        return found_caractersitics
