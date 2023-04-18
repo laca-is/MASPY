@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from collections.abc import Callable
 from time import sleep
+import importlib as implib
 
 @dataclass
 class Belief:
@@ -31,14 +32,18 @@ class agent:
         if plans is None or not plans:
             plans = {}
 
+        self.__environments = {}
         self.my_name = name
         self.__beliefs = beliefs
         self.__objectives = objectives
         self.__plans = plans
-        self.__plans.update({'reasoning' : lambda : self.reasoning()})
+        self.__plans.update({'reasoning' : self.reasoning})
         
-        self.paused_agent = False
+        self.paused_agent = False   
         print(f'{name}> Initialized')
+    
+    def focus_environment(self, environment):
+        self.__environments[environment] = implib.import_module(environment) 
     
     def add_belief(self, belief):
         assert type(belief) == Belief
@@ -55,7 +60,7 @@ class agent:
             
             if self.paused_agent:
                 self.paused_agent = False
-                self.__plans['reasoning'](self)
+                self.__plans['reasoning']()
 
     def rm_objective(self, objective):
         self.__objectives.remove(objective)
@@ -114,9 +119,9 @@ class agent:
                 print(f'{self.my_name}> Removing {belief}')
 
             case ("achieve", objective):
-                self.add_objective(objective)
                 print(f'{self.my_name}> Adding {objective}')
-
+                self.add_objective(objective)
+                
             case ("unachieve", objective):
                 self.rm_objective(objective)
                 print(f'{self.my_name}> Removing {objective}')
@@ -157,17 +162,21 @@ class agent:
     def reasoning(self):
         while self.__objectives:
             self.perception()
+            # Adicionar guard para os planos
+            #  -funcao com condicoes para o plano rodar
+            #  -um plano eh (guard(),plano())
             self.execution()
         self.paused_agent = True
             
     def perception(self):
+
         pass
 
     def execution(self):
         if not self.__objectives:
             return None
         objective = self.__objectives[-1]
-        print(f"{self.my_name}> Execution {objective}")
+        print(f"{self.my_name}> Execution of {objective}")
         try:
             result = self.__run_plan(objective)
             if objective in self.__objectives:

@@ -92,7 +92,7 @@ class comms:
                 self.__agents[msg['target']].recieve_msg(msg['self']\
                                 .my_name,msg['act'],msg['msg'])
             except(KeyError):
-                print(f"Agent {msg['target']} doesn't exist")
+                print(f"Agent {msg['target']} doesn't existsssss")
 
         
             return func(*args, **kwargs)

@@ -3,8 +3,8 @@ from agent import agent, Belief, Ask, Objective
 class driver(agent):
     def __init__(self, name, beliefs = [], objectives = [], plans = {}) -> None:
         super().__init__(name, beliefs, objectives, plans)
-        self.add_plan({'offer': lambda self,src: driver.offer(self,src),
-                    'consider_price': lambda self,src, p : driver.consider_price(self,src,p)})
+        self.add_plan({'offer': driver.offer,
+                    'consider_price': driver.consider_price})
 
     def offer(self,src):
         agents = self.search_beliefs(Belief('Agents',['A'])).args[0]
