@@ -1,5 +1,5 @@
-import communication as cmnct
-from agent import Belief, Ask, Objective
+import maspy.communication as cmnct
+from maspy.agent import Belief, Ask, Objective
 from driver import driver
 from manager import manager
 import importlib as imp
@@ -20,14 +20,19 @@ def main():
     # print(v)
 
     # #for vaga in caracs['vagas']:
-
-    imprt = imp.import_module('environment')
+    imprt = imp.import_module('maspy.''environment')
     env = imprt.env()
-    env.add_caracteristic('vagas',{'A2':False},'gerente')
-    env.add_caracteristic('vagas',{'A1':True},'gerente')
-    env.add_role('gerente')
-    print(env.get_caracteristics('all'))
-
+    env.add_fact('vagas',{'a' : 1},'gerente')
+    env.add_fact('vagas',{'b' : 2},'kay')
+    env.add_role('kay')
+    print(env.get_facts('all'))
+    env.rm_fact('vagas','b')
+    print(env.get_facts('all'))
+    #drv = driver('driver')
+    #drv.recieve_msg('World','achieve',Objective('test_focus'))
+    #drv.reasoning()
+    
+    
     print("END")
 
 if __name__ == "__main__":

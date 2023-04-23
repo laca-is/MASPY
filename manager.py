@@ -1,4 +1,4 @@
-from agent import agent, Belief, Ask, Objective
+from maspy.agent import agent, Belief, Ask, Objective
 
 class manager(agent):
     def __init__(self, name, beliefs = [], objectives = [], plans = {}) -> None:

@@ -42,8 +42,12 @@ class agent:
         self.paused_agent = False   
         print(f'{name}> Initialized')
     
-    def focus_environment(self, environment):
-        self.__environments[environment] = implib.import_module(environment) 
+    def add_focus(self, environment):
+        self.__environments[environment] = implib.import_module(environment)
+        return self.__environments[environment]
+    
+    def rm_focus(self, environment):
+        del self.__environments[environment]
     
     def add_belief(self, belief):
         assert type(belief) == Belief
