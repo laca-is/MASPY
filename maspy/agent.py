@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from collections.abc import Callable
+from maspy.system_control import control
 from time import sleep
 import importlib as implib
 
@@ -31,16 +31,18 @@ class agent:
             objectives = []
         if plans is None or not plans:
             plans = {}
-
-        self.__environments = {}
+        
         self.my_name = name
+        control().add_agents(self)
+        
+        self.__environments = {}
         self.__beliefs = beliefs
         self.__objectives = objectives
         self.__plans = plans
         self.__plans.update({'reasoning' : self.reasoning})
         
         self.paused_agent = False   
-        print(f'{name}> Initialized')
+        print(f'{self.my_name}> Initialized')
     
     def add_focus(self, environment):
         self.__environments[environment] = implib.import_module(environment)

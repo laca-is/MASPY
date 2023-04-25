@@ -1,3 +1,4 @@
+from threading import Lock
 
 '''
 gerenciar 
@@ -14,9 +15,19 @@ Get perception:
         -considerar cargo do agente
 
 '''
+class envMeta(type):
+    _instances = {}
+    _lock: Lock = Lock()
+    
+    def __call__(cls, __my_name='Env'):
+        with cls._lock:
+            if __my_name not in cls._instances:
+                instance = super().__call__(__my_name)
+                cls._instances[__my_name] = instance
+        return cls._instances[__my_name]
 
-class env:
-    def __init__(self, env_name='env') -> None:
+class env(metaclass=envMeta):
+    def __init__(self, env_name) -> None:
         self.__my_name = env_name
         self.__facts = {'any' : {}}
         self.__roles = {'any'}

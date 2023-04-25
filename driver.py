@@ -15,7 +15,8 @@ class driver(agent):
         print(env.get_caracteristics('all'))
     
     def offer(self,src):
-        agents = self.search_beliefs(Belief('Agents',['A'])).args[0]
+        agents = self.search_beliefs(Belief('Agents',['A']))
+        print(agents)
         print(f"{self.my_name}> Offering 20 to all drivers")
         for agent_name in agents:
             if self.my_name != agent_name and agents[agent_name] == 'driver':
