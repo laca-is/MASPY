@@ -8,7 +8,7 @@ class commsMeta(type):
     _instances = {}
     _lock: Lock = Lock()
     
-    def __call__(cls, __my_name='Comm'):
+    def __call__(cls, __my_name='comm'):
         with cls._lock:
             if __my_name not in cls._instances:
                 instance = super().__call__(__my_name)

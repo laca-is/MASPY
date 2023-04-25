@@ -19,7 +19,7 @@ class envMeta(type):
     _instances = {}
     _lock: Lock = Lock()
     
-    def __call__(cls, __my_name='Env'):
+    def __call__(cls, __my_name='env'):
         with cls._lock:
             if __my_name not in cls._instances:
                 instance = super().__call__(__my_name)
@@ -49,23 +49,38 @@ class env(metaclass=envMeta):
     
     #def add_multiple_facts(self, name, data, role='any'):
     
-    def add_fact(self, name, data, role='any'):
+    def create_fact(self, name, data, role='any'):
         if role != 'any':
             if role not in self.__roles:
                 self.add_role(role)
-        try:
-            match data:
-                case list() | tuple():
-                    self.__facts[role][name].append(data)
-                case dict() | set():
-                    self.__facts[role][name].update(data)
-                case int() | float():
-                    self.__facts[role][name] = data
-        except(KeyError):
-            try:
-                self.__facts[role][name] = data
-            except(KeyError):
+
+        if role in self.__facts:
+            if name not in self.__facts[role]:
                 self.__facts[role] = {name : data}
+            else:
+                print(f"{self.__my_name}> Fact *{name}:{role}* already created")
+        else:
+            self.__facts[role] = {name : data}
+
+
+    def update_fact(self, name, data, role='any'):
+        if role in self.__facts:
+            if name in self.__facts[role]:
+                self.__facts[role] = {name : data}
+            else:
+                print(f"{self.__my_name}> Fact *{name}:{role}* doesn't exist")
+        else:
+            print(f"{self.__my_name}> Fact *{role}* doesn't exist")
+
+    def extend_fact(self, name, data, role='any'):
+        match self.__facts[role][name]:
+            case list() | tuple():
+                self.__facts[role][name].append(data)
+            case dict() | set():
+                self.__facts[role][name].update(data)
+            case int() | float() | str():
+                print(f"{self.__my_name}> Impossible to extend type {type(data)}")
+    
     
     def rm_fact(self, del_name, del_data=None, del_role=None):
         if del_role is None:
