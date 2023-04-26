@@ -32,12 +32,11 @@ class control(metaclass=controlMeta):
     def add_agents(self, agents):
         try:
             for agent in agents:
-                self.__add_agent(agent)
+                self._add_agent(agent)
         except(TypeError):
-            self.__add_agent(agents)
+            self._add_agent(agents)
 
-
-    def __add_agent(self, agent):
+    def _add_agent(self, agent):
         agent.my_name = f'{agent.my_name}#{random.randint(1000,9999)}' 
         if agent.my_name in self.__agents:
             aux = agent.my_name.split('#')
@@ -52,12 +51,12 @@ class control(metaclass=controlMeta):
     def rm_agents(self, agents):
         try:
             for agent in agents:
-                self.__rm_agent(agent)
+                self._rm_agent(agent)
         except(TypeError):
-            self.__rm_agent(agents)
+            self._rm_agent(agents)
         #self.send_agents_list()
     
-    def __rm_agent(self, agent):
+    def _rm_agent(self, agent):
         if agent.my_name in self.__agents:
             del(self.__agents[agent.my_name])
             del(self.__agent_list[agent.my_name])
@@ -70,7 +69,7 @@ class control(metaclass=controlMeta):
         print(f'{self.__my_name}> Starting all connected agents')
         for agent_name in self.__agents:
             no_agents = False
-            self.__start_agent(agent_name)
+            self._start_agent(agent_name)
 
         if no_agents:
             print(f'{self.__my_name}> No agents are connected')
@@ -80,12 +79,12 @@ class control(metaclass=controlMeta):
         try:
             print(f'{self.__my_name}> Starting listed agents')
             for agent in agents:
-                self.__start_agent(agent.my_name)
+                self._start_agent(agent.my_name)
         except(TypeError):
             print(f'{self.__my_name}> Starting agent {type(agents).__name__}:{agents.my_name}')
-            self.__start_agent(agents.my_name)
+            self._start_agent(agents.my_name)
 
-    def __start_agent(self,agent_name):
+    def _start_agent(self,agent_name):
         try:
             if agent_name in self.__started_agents:
                 print(f"{self.__my_name}> Agent {agent_name} already started")
@@ -95,7 +94,3 @@ class control(metaclass=controlMeta):
             agent.reasoning()
         except(KeyError):
             print(f"{self.__my_name}> Agent {agent_name} not connected to environment")
-
-    # def send_agents_list(self):
-    #     for agent_name in self.__agents:
-    #         self.__agents[agent_name].recieve_msg(agent_name,'env_tell',Belief('Agents',[self.__agent_list]))

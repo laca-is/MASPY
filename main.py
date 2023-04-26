@@ -7,6 +7,7 @@ from manager import manager
 import importlib as imp
 
 def main():
+
     # comm = cmnct.comms('comm')
     #ctrl = control()
 
@@ -33,7 +34,7 @@ def main():
     # print(a is b)
     # print(a is c)
     # print(b is c)
-    
+
     imprt = imp.import_module('maspy.''environment')
     env = imprt.env()
     env.create_fact('vagas',{'a':1},'gerente')
