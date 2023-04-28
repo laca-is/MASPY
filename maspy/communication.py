@@ -27,6 +27,7 @@ class comms(metaclass=commsMeta):
         except(TypeError):
             self._add_agent(agents)
 
+
     def _add_agent(self, agent):
         agent.my_name = f'{agent.my_name}#{random.randint(1000,9999)}' 
         if agent.my_name in self.__agents:
@@ -45,7 +46,7 @@ class comms(metaclass=commsMeta):
                 self._rm_agent(agent)
         except(TypeError):
             self._rm_agent(agents)
-        self._send_agents_list()
+        self.send_agents_list()
     
     def _rm_agent(self, agent):
         if agent.my_name in self.__agents:
@@ -53,9 +54,10 @@ class comms(metaclass=commsMeta):
             del(self.__agent_list[agent.my_name])
         print(f'{self.__my_name}> Desconnecting agent {type(agent).__name__}:{agent.my_name} from channel')
 
-    def _send_agents_list(self):
+    def send_agents_list(self):
         for agent_name in self.__agents:
             self.__agents[agent_name].recieve_msg(agent_name,'env_tell',Belief('Agents',[self.__agent_list]))
+
          
     def function_call(self, func):
         @wraps(func)

@@ -34,20 +34,14 @@ def main():
     # print(a is b)
     # print(a is c)
     # print(b is c)
-
+    
+    
     imprt = imp.import_module('maspy.''environment')
     env = imprt.env()
-    env.create_fact('vagas',{'a':1},'gerente')
-    env.extend_fact('vagas',{1:'a'},'gerente')
-    # env.add_fact('vagas',{'a' : 1},'gerente')
-    # env.add_fact('vagas',{'b' : 2},'gerente')
-    # env.add_fact('num',[1])
-    # env.add_fact('num',[2,3])
-    # #env.add_role('kay')
-    # print(env.get_facts('all'))
-    # env.rm_fact('vagas','b')
-    # env.add_fact('vagas',{'a' : 5},'gerente')
-    # #env.rm_fact('num','b')
+    env.create_fact('vagas',{1 , 2, 'a', 4},'gerente')
+    env.extend_fact('vagas',{3, 6},'gerente')
+    env.reduce_fact('vagas','a','gerente')
+
     print(env.get_facts('all'))
     
     #drv = driver('driver')
