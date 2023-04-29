@@ -1,7 +1,7 @@
 class InvalidPlanError(TypeError):
     pass
 
-class InvalidObjectError(TypeError):
+class InvalidObjectiveError(TypeError):
     pass
 
 class InvalidBeliefError(TypeError):

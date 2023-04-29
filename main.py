@@ -11,10 +11,10 @@ def main():
     # comm = cmnct.comms('comm')
     #ctrl = control()
 
-    drv3 = driver('drv3', 1 ,[Objective('a')], plans=('a', lambda agent, src: print('Hello World agent')))
+    # drv3 = driver('drv3', 1 ,[Objective('a')], plans=('a', lambda agent, src: print('Hello World agent')))
     # drv2 = driver('drv2')
     # drv1 = driver('drv1', [Belief('price',[10])], [Objective('offer')])
-    Control().start_all_agents()
+    # Control().start_all_agents()
     
     # mgr = manager('mgr')
     # ctrl.add_agents([drv1,drv2,drv4])
