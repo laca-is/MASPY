@@ -1,5 +1,9 @@
 import random
 from threading import Lock
+from typing import List
+from collections.abc import Iterable
+
+from maspy.agent import Agent
 
 '''
     Class for abstract control of all agents
@@ -8,7 +12,7 @@ from threading import Lock
         -Initialization
 '''
 
-class controlMeta(type):
+class ControlMeta(type):
     _instances = {}
     _lock: Lock = Lock()
     
@@ -19,24 +23,24 @@ class controlMeta(type):
                 cls._instances[cls] = instance
         return cls._instances[cls]
     
-class control(metaclass=controlMeta):
+class Control(metaclass=ControlMeta):
     def __init__(self, ctrl_name='ctrl') -> None:
         self.__my_name = ctrl_name
-        self.__started_agents = []
+        self.__started_agents: List[Agent] = []
         self.__agent_list = {}
         self.__agents = {}
 
-    def get_agents(self):
+    def get_agents(self) -> List[Agent]:
         return self.__agent_list
     
-    def add_agents(self, agents):
+    def add_agents(self, agents: Iterable[Agent] | Agent):
         try:
             for agent in agents:
                 self._add_agent(agent)
         except(TypeError):
             self._add_agent(agents)
 
-    def _add_agent(self, agent):
+    def _add_agent(self, agent: Agent):
         agent.my_name = f'{agent.my_name}#{random.randint(1000,9999)}' 
         if agent.my_name in self.__agents:
             aux = agent.my_name.split('#')
@@ -48,7 +52,8 @@ class control(metaclass=controlMeta):
         self.__agents[agent.my_name] = agent
         print(f'{self.__my_name}> Adding agent {type(agent).__name__}:{agent.my_name} to System')
 
-    def rm_agents(self, agents):
+    def rm_agents(self, agents: Iterable[Agent] | Agent):
+
         try:
             for agent in agents:
                 self._rm_agent(agent)
@@ -56,7 +61,7 @@ class control(metaclass=controlMeta):
             self._rm_agent(agents)
         #self.send_agents_list()
     
-    def _rm_agent(self, agent):
+    def _rm_agent(self, agent: Agent):
         if agent.my_name in self.__agents:
             del(self.__agents[agent.my_name])
             del(self.__agent_list[agent.my_name])
@@ -74,7 +79,7 @@ class control(metaclass=controlMeta):
         if no_agents:
             print(f'{self.__my_name}> No agents are connected')
 
-    def start_agents(self, agents):
+    def start_agents(self, agents: Iterable[Agent] | Agent):
         #self.send_agents_list()
         try:
             print(f'{self.__my_name}> Starting listed agents')
@@ -84,7 +89,7 @@ class control(metaclass=controlMeta):
             print(f'{self.__my_name}> Starting agent {type(agents).__name__}:{agents.my_name}')
             self._start_agent(agents.my_name)
 
-    def _start_agent(self,agent_name):
+    def _start_agent(self, agent_name: Agent) -> None:
         try:
             if agent_name in self.__started_agents:
                 print(f"{self.__my_name}> Agent {agent_name} already started")

@@ -2,7 +2,7 @@ import inspect
 import random
 from threading import Lock
 from functools import wraps
-from maspy.agent import agent, Belief
+from maspy.agent import Agent, Belief
 
 class commsMeta(type):
     _instances = {}
@@ -18,7 +18,7 @@ class commsMeta(type):
 class comms(metaclass=commsMeta):
     def __init__(self, env_name) -> None:
         self.__my_name = env_name
-        agent.send_msg = self.function_call(agent.send_msg)
+        Agent.send_msg = self.function_call(Agent.send_msg)
     
     def add_agents(self, agents):
         try:

@@ -1,4 +1,5 @@
 from threading import Lock
+from typing import Any, Dict, Optional, Set
 
 '''
 gerenciar 
@@ -15,8 +16,8 @@ Get perception:
         -considerar cargo do agente
 
 '''
-class envMeta(type):
-    _instances = {}
+class EnvMeta(type):
+    _instances: Dict[str, Any] = {}
     _lock: Lock = Lock()
     
     def __call__(cls, __my_name='env'):
@@ -26,30 +27,30 @@ class envMeta(type):
                 cls._instances[__my_name] = instance
         return cls._instances[__my_name]
 
-class env(metaclass=envMeta):
+class Environment(metaclass=EnvMeta):
     def __init__(self, env_name) -> None:
         self._my_name = env_name
-        self.__facts = {'any' : {}}
+        self.__facts: Dict[str, Any] = {'any' : {}}
         self.__roles = {'any'}
 
-    def add_role(self, role_name):
+    def add_role(self, role_name: str):
         if type(role_name) == str:
             self.__roles.add(role_name)
         else:
             print(f'{self._my_name}> role *{role_name}* is not a string')
 
-    def rm_role(self, role_name):
+    def rm_role(self, role_name: str):
         self.__roles.remove(role_name)
 
-    def get_roles(self):
+    def get_roles(self) -> Set[str]:
         return self.__roles
     
-    def check_role(self, role):
+    def check_role(self, role: str) -> bool:
         return role in self.__roles
     
     #def add_multiple_facts(self, name, data, role='any'):
     
-    def create_fact(self, name, data, role='any'):
+    def create_fact(self, name: str, data: Any, role='any'):
         if role != 'any':
             if role not in self.__roles:
                 self.add_role(role)
@@ -63,11 +64,11 @@ class env(metaclass=envMeta):
             self.__facts[role] = {name : data}
 
 
-    def update_fact(self, name, data, role='any'):
+    def update_fact(self, name: str, data: Any, role='any'):
         if self.fact_exists(name, role):
             self.__facts[role] = {name : data}
 
-    def extend_fact(self, name, data, role='any'):
+    def extend_fact(self, name: str, data: str, role='any'):
         if not self.fact_exists(name, role):
             return
         try:
@@ -98,7 +99,7 @@ class env(metaclass=envMeta):
         except(KeyError, ValueError):
             print(f"{self._my_name}> Fact {name}:{type(self.__facts[role][name])} doesn't contain {data}")
     
-    def fact_exists(self, name, role):
+    def fact_exists(self, name: str, role: str) -> bool:
         try:
             self.__facts[role][name]
         except(KeyError):
@@ -107,7 +108,7 @@ class env(metaclass=envMeta):
         return True
 
     
-    def rm_fact(self, del_name, del_data=None, del_role=None):
+    def rm_fact(self, del_name: str, del_data: Any = None, del_role: Optional[str] = None):
         if del_role is None:
             for role in self.__roles:
                 if del_name in self.__facts[role].keys():
@@ -117,7 +118,7 @@ class env(metaclass=envMeta):
                         del self.__facts[role][del_name][del_data]
 
         
-    def get_facts(self, agent_role=None):
+    def get_facts(self, agent_role: Optional[str] = None):
         print(self.__facts)
         found_facts = {}
         for role in self.__roles:

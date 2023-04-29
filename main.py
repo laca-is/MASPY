@@ -1,6 +1,6 @@
 import maspy.communication as cmnct
 import maspy.environment as envrmt
-from maspy.system_control import control
+from maspy.system_control import Control
 from maspy.agent import Belief, Ask, Objective
 from driver import driver
 from manager import manager
@@ -11,7 +11,7 @@ def main():
     # comm = cmnct.comms('comm')
     #ctrl = control()
 
-    # drv3 = driver('drv3', [Belief('price',[15])])
+    drv3 = driver('drv3', [Belief('price',[15])], plans=[1,2,'a',Belief('foo', [])])
     # drv2 = driver('drv2')
     # drv1 = driver('drv1', [Belief('price',[10])], [Objective('offer')])
     # control().start_all_agents()
@@ -36,13 +36,13 @@ def main():
     # print(b is c)
     
     
-    imprt = imp.import_module('maspy.''environment')
-    env = imprt.env()
-    env.create_fact('vagas',{1 , 2, 'a', 4},'gerente')
-    env.extend_fact('vagas',{3, 6},'gerente')
-    env.reduce_fact('vagas','a','gerente')
+    # imprt = imp.import_module('maspy.''environment')
+    # env = imprt.env()
+    # env.create_fact('vagas',{1 , 2, 'a', 4},'gerente')
+    # env.extend_fact('vagas',{3, 6},'gerente')
+    # env.reduce_fact('vagas','a','gerente')
 
-    print(env.get_facts('all'))
+    # print(env.get_facts('all'))
     
     #drv = driver('driver')
     #drv.recieve_msg('World','achieve',Objective('test_focus'))
