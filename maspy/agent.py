@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from maspy.environment import Environment
+from maspy.error import InvalidBeliefError, InvalidObjectiveError, InvalidPlanError, RunPlanError
 from maspy.system_control import Control
 from typing import List, Optional, Dict, Tuple, Any
 from collections.abc import Iterable, Callable
@@ -64,18 +65,18 @@ class Agent:
 
     def add_belief(self, belief: Belief):
 
-        if not isinstance(belief, Belief):
-            raise TypeError(f"Expected belief with type Belief, recieved {type(belief).__name__}")
+        beliefs = self._clean_beliefs(belief)
 
-        if belief not in self.__beliefs:
-            self.__beliefs.append(belief)
+        # TODO: Change beliefs for a set
+        if beliefs not in self.__beliefs:
+            self.__beliefs.append(beliefs)
 
 
     def rm_belief(self, belief: Belief):
         self.__beliefs.remove(belief)
 
 
-    def add_objective(self, objective: Objective):
+    def add_objective(self, objective: Iterable[Objective] | Objective):
 
         objectives = self._clean_objectives(objective)
 
@@ -91,7 +92,7 @@ class Agent:
         self.__objectives.remove(objective)
 
 
-    def add_plan(self, plan: Optional[Tuple[str, Callable] | Dict[str, Callable]]):
+    def add_plan(self, plan: Tuple[str, Callable] | Dict[str, Callable]):
         new_plans = self._clean_plans(plan)
         self.__plans.update(new_plans)
     
@@ -124,7 +125,7 @@ class Agent:
             return self.__plans[plan.key](self, plan.source, *plan.args)
         except(TypeError, KeyError):
             print(f"{self.my_name}> Plan {plan} doesn't exist")
-            raise RuntimeError #TODO: Define New error or better error
+            raise RunPlanError 
 
 
     # TODO: implement stoping plan
@@ -217,10 +218,10 @@ class Agent:
             if objective in self.__objectives:
                 self.rm_objective(objective)
 
-        except(RuntimeError):
+        except(RunPlanError):
             print(f"{self.my_name}> {objective} failed")
 
-    # TODO: Change TypeError to something more specific
+    # TODO: should invalid arguments be an error or a warning?
     def _clean_beliefs(self, beliefs: Optional[Iterable[Belief] | Belief]) -> List[Belief]:
         match beliefs:
             case None:
@@ -230,10 +231,10 @@ class Agent:
             case Iterable():
                 for belief in beliefs:
                     if not isinstance(belief, Belief):
-                        raise TypeError(f"Expected beliefs to have type Iterable[Belief] | Belief, recieved Iterable[{type(belief).__name__}]")
+                        raise InvalidBeliefError(f"Expected beliefs to have type Iterable[Belief] | Belief, recieved Iterable[{type(belief).__name__}]")
                 return list(beliefs)
             case _:
-                raise TypeError(f"Expected beliefs to have type Iterable[Belief] | Belief, recieved {type(beliefs).__name__}")
+                raise InvalidBeliefError(f"Expected beliefs to have type Iterable[Belief] | Belief, recieved {type(beliefs).__name__}")
 
 
     def _clean_objectives(self, objectives: Optional[Iterable[Objective] | Objective]) -> List[Objective]:
@@ -245,10 +246,10 @@ class Agent:
             case Iterable():
                 for objective in objectives:
                     if not isinstance(objective, Objective):
-                        raise TypeError(f"Expected objectives to have type Iterable[Objectives] | Objectives, recieved {type(objective).__name__}")
+                        raise InvalidObjectiveError(f"Expected objectives to have type Iterable[Objectives] | Objectives, recieved {type(objective).__name__}")
                 return list(objectives)
             case _:
-                raise TypeError(f"Expected beliefs to have type Iterable[Objectives] | Objectives, recieved {type(objectives).__name__}")
+                raise InvalidObjectiveError(f"Expected beliefs to have type Iterable[Objectives] | Objectives, recieved {type(objectives).__name__}")
 
 
     def _clean_plans(self, plans: Optional[Dict[str, Callable[..., Any]] | Tuple[str, Callable[..., Any]] | Iterable[Tuple[str, Callable[..., Any]]]]) -> Dict[str, Callable[...,Any]]:
@@ -260,25 +261,25 @@ class Agent:
             case tuple():
                 type_list = tuple(map(lambda x: type(x).__name__, plans))
                 types = ', '.join(type_list)
-                raise TypeError(f"Expected plans to have type Tuple[str, Callable], recieved Tuple[{types}]")
+                raise InvalidPlanError(f"Expected plans to have type Tuple[str, Callable], recieved Tuple[{types}]")
 
             case dict():
                 for key, plan in plans.items():
                     if not (isinstance(key, str) or callable(plan)):
-                        raise TypeError(f"Expected plans to have type Dict[str, Callable], recieved Dict[{type(key).__name__}, {type(plan).__name__}]")
+                        raise InvalidPlanError(f"Expected plans to have type Dict[str, Callable], recieved Dict[{type(key).__name__}, {type(plan).__name__}]")
                 return plans
 
             case Iterable(): 
                 try:
                     for key, plan in plans: # type: ignore
                         if not (isinstance(key, str) or callable(plan)):
-                            raise TypeError(f"Expected plans to have type Iterable[Tuple[str, Callable]], recieved Iterable[Tuple[{type(key).__name__}, {type(plan).__name__}")
+                            raise InvalidPlanError(f"Expected plans to have type Iterable[Tuple[str, Callable]], recieved Iterable[Tuple[{type(key).__name__}, {type(plan).__name__}")
                     return dict(plans)
                 except TypeError:
                     type_set = set(map(lambda x: type(x).__name__, plans))
                     types = ' | '.join(type_set) 
-                    raise TypeError(f"Expected plans to have type Iterable[Tuple[str, Callable]], recieved Iterable[{types}]")
+                    raise InvalidPlanError(f"Expected plans to have type Iterable[Tuple[str, Callable]], recieved Iterable[{types}]")
             case _:
-                raise TypeError(f"Expected plans to have type Dict[str, Callable] | Iterable[Tuple[str, Callable]] | Tuple(str, Callable), recieved {type(plans).__name__}")
+                raise InvalidPlanError(f"Expected plans to have type Dict[str, Callable] | Iterable[Tuple[str, Callable]] | Tuple(str, Callable), recieved {type(plans).__name__}")
         return {}
 
