@@ -9,7 +9,7 @@ from crossroads import crossroads
 
 def main():
     env = crossroads('cross_env')
-    channel = cmnct.comms('crossing')
+    channel = cmnct.Comms('crossing')
     drv1 = driver('drv1', objectives=[Objective('enter_lane','South>North')])
     drv2 = driver('drv2')
     channel.add_agents([drv1,drv2])
@@ -17,15 +17,15 @@ def main():
     drv2.add_focus('crossroads')
     # comm = cmnct.comms('comm')
     # ctrl = control()
-    b1 = Belief("foo", 1)
-    b2 = Belief("foo", 2)
-    b3 = Belief("foo", [3, 4])
-    drv = driver(
-        "drv3",
-        [b1, b2, b3, b1],
-        [Objective("a")],
-        plans=("a", lambda agent, src: print("Hello World agent")),
-    )
+    # b1 = Belief("foo", 1)
+    # b2 = Belief("foo", 2)
+    # b3 = Belief("foo", [3, 4])
+    # drv = driver(
+    #     "drv3",
+    #     [b1, b2, b3, b1],
+    #     [Objective("a")],
+    #     plans=("a", lambda agent, src: print("Hello World agent")),
+    # )
     # drv2 = driver('drv2')
     # drv1 = driver('drv1', [Belief('price',[10])], [Objective('offer')])
     # Control().start_all_agents()
