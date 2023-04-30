@@ -14,7 +14,7 @@ import importlib as implib
 import inspect
 
 
-@dataclass(eq=True, frozen=True, unsafe_hash=True)
+@dataclass(eq=True, frozen=True)
 class Belief:
     key: str
     args: tuple = field(default_factory=tuple)
@@ -55,6 +55,23 @@ class Belief:
             new_source = self.source
 
         return Belief(new_name, new_args, new_source)
+
+    # implementing hash for Belief is fine, it is impossible to change something inside
+    # without creating a new object therefore, Belief can be used in dict and sets
+    def __hash__(self) -> int:
+        args_hashable = []
+        unhashable_types = {}
+        for arg in self.args:
+            arg_dict = type(arg).__dict__
+            if arg_dict.get("__hash__"):
+                args_hashable.append(arg)
+            elif isinstance(arg, (List, Dict, Set)):
+                args_hashable.append(repr(arg))
+            else:
+                raise TypeError(f"Unhashable type: {type(arg)}")
+        args_hashable = tuple(args_hashable)
+
+        return hash((self.key, args_hashable, self.source))
 
 
 @dataclass
@@ -182,10 +199,11 @@ class Agent:
 
     def search_beliefs(
         self,
-        name: Optional[str] = None,
         belief: Optional[Belief] = None,
+        name: Optional[str] = None,
         arg_size=0,
         source="percept",
+        weak_eq=False,
         all=False,
     ):
         if name is not None:
@@ -199,16 +217,15 @@ class Agent:
 
         for bel in self.__beliefs:
             if belief == bel:
-                if not all:
-                    return belief
-                else:
-                    found_beliefs.append(belief)
-            elif bel.weak_eq(belief):
-                if not all:
-                    return bel
-                else:
-                    found_beliefs.append(bel)
-        return found_beliefs
+                found_beliefs.insert(0, belief)
+            elif weak_eq and bel.weak_eq(belief):
+                found_beliefs.append(bel)
+        if all:
+            return found_beliefs
+        elif found_beliefs:
+            return found_beliefs[0]
+        else:
+            return []
 
     def _run_plan(self, plan):
         sleep(0.2)
