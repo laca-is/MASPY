@@ -23,6 +23,23 @@ def test_beliefs():
     
 
 
+
+def test_beliefs():
+    a = Belief("foo", "abc")
+    b = Belief("foo", 1)
+    c = Belief("foo", 1.0)
+    d = Belief("foo", 1j)
+    e = Belief("foo", [1, [1, 2]])
+    f = Belief("foo", (1, 2, 3, [2, 3, {1}], {"a": "a"}))
+    g = Belief("foo", {1: 1, "a": "foo", (1, 2): "teste"})
+    h = {a,b,c,d}
+    #i = {e, f , g} # TypeError: unhashable type: 'list'
+    #i = {e: "", f: "", g: ""} # TypeError: unhashable type: 'list'
+    for x in h:
+        print(x) # The set detects 1 (b) and 1.0 (c) to be the same
+    
+
+
 def main():
     env = crossroads("cross_env")
     channel = cmnct.Comms("crossing")
