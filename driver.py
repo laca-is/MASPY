@@ -1,6 +1,6 @@
-from maspy.agent import agent, Belief, Ask, Objective
+from maspy.agent import Agent, Belief, Ask, Objective
 
-class driver(agent):
+class driver(Agent):
     def __init__(self, name, beliefs = [], objectives = [], plans = {}) -> None:
         super().__init__(name, beliefs, objectives, plans)
         self.cross = self.add_focus('crossroads')

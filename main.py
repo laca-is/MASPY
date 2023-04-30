@@ -1,10 +1,11 @@
 import maspy.communication as cmnct
 import maspy.environment as envrmt
-from maspy.system_control import control
+from maspy.system_control import Control
 from maspy.agent import Belief, Ask, Objective
 from driver import driver
 import importlib as imp
 from crossroads import crossroads
+
 
 def main():
     env = crossroads('cross_env')
@@ -14,6 +15,20 @@ def main():
     channel.add_agents([drv1,drv2])
     drv1.add_focus('crossroads')
     drv2.add_focus('crossroads')
+    # comm = cmnct.comms('comm')
+    # ctrl = control()
+    b1 = Belief("foo", 1)
+    b2 = Belief("foo", 2)
+    b3 = Belief("foo", [3, 4])
+    drv = driver(
+        "drv3",
+        [b1, b2, b3, b1],
+        [Objective("a")],
+        plans=("a", lambda agent, src: print("Hello World agent")),
+    )
+    # drv2 = driver('drv2')
+    # drv1 = driver('drv1', [Belief('price',[10])], [Objective('offer')])
+    # Control().start_all_agents()
 
     # mgr = manager('mgr')
     # ctrl.add_agents([drv1,drv2,drv4])
@@ -26,7 +41,7 @@ def main():
     # v['any'].update({'vaga': {}})
     # v['any']
     # print(v)
-    
+
     # a = cmnct.comms('Publico')
     # b = cmnct.comms('Publico')
     # c = cmnct.comms()
@@ -48,7 +63,21 @@ def main():
     #drv.reasoning()
     
     
+
+    # imprt = imp.import_module('maspy.''environment')
+    # env = imprt.env()
+    # env.create_fact('vagas',{1 , 2, 'a', 4},'gerente')
+    # env.extend_fact('vagas',{3, 6},'gerente')
+    # env.reduce_fact('vagas','a','gerente')
+
+    # print(env.get_facts('all'))
+
+    # drv = driver('driver')
+    # drv.recieve_msg('World','achieve',Objective('test_focus'))
+    # drv.reasoning()
+
     print("END")
+
 
 if __name__ == "__main__":
     main()
