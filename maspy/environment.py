@@ -74,15 +74,15 @@ class Environment(metaclass=EnvironmentMultiton):
 
     def _update_fact(self, name: str, data: Any, role="any"):
         if self._fact_exists(name, role):
-            print(f"{self._my_name}> Updating fact {role}:{name}:[{self.__facts[role][name]} > ",end="")
+            print(f"{self._my_name}> Updating fact {role}:{name}:[{self._facts[role][name]} > ",end="")
             self._facts[role] = {name: data}
-            print(f"{self.__facts[role][name]}]")
+            print(f"{self._facts[role][name]}]")
 
     def _extend_fact(self, name: str, data: str, role="any"):
         if not self._fact_exists(name, role):
             return
         try:
-            print(f"{self._my_name}> Extending fact {role}:{name}[{self.__facts[role][name]} > ",end="")
+            print(f"{self._my_name}> Extending fact {role}:{name}[{self._facts[role][name]} > ",end="")
             match self._facts[role][name]:
                 case list() | tuple():
                     self._facts[role][name].append(data)
@@ -92,6 +92,7 @@ class Environment(metaclass=EnvironmentMultiton):
                     print(
                         f"{self._my_name}> Impossible to extend fact {name}:{type(data)}"
                     )
+            print(f"{self._facts[role][name]}]")
         except (TypeError, ValueError):
             print(
                 f"{self._my_name}> Fact {name}:{type(self._facts[role][name])} can't extend {type(data)}"

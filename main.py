@@ -1,11 +1,12 @@
 import maspy.communication as cmnct
 import maspy.environment as envrmt
 from maspy.system_control import Control
-from maspy.agent import Belief, Ask, Objective
-from driver import driver
+from maspy.agent import Agent, Belief, Ask, Objective
 import importlib as imp
-from crossroads import crossroads
-
+from examples.crossing_negotiation.driver import driver
+from examples.crossing_negotiation.crossroads import crossroads
+from examples.garbage_cleaner.robot import Robot
+from examples.garbage_cleaner.room import Room
 
 def test_beliefs():
     bel_str = Belief("foo", "abc")
@@ -15,13 +16,22 @@ def test_beliefs():
     bel_lists = Belief("foo", [1, [1, 2]])
     bel_tuples = Belief("foo", (1, 2, 3, [2, 3, {1}], {"a": "a"}))
     bel_dicts = Belief("foo", {1: 1, "a": "foo", (1, 2): "teste"})
-
+    #a = {bel_tuples, bel_dicts}
+    a = {bel_dicts: bel_lists}
+    #print(f">>>{a}")
+    
     beliefs = set(
         [bel_str, bel_int, bel_float, bel_complex, bel_lists, bel_tuples, bel_dicts]
     )
+    #print(beliefs)
     bel = Belief("foo", [1, 2])
 
-    d = driver("d", beliefs)
+    d = Agent("d", beliefs, None, None)
+    bels = d.search_beliefs("foo",arg_size=1,all=True)
+    #print(bels[0].args[0])
+    print(bels)
+    #d.prepare_msg("","tell",bel_str)
+    #d = driver("d", beliefs)
     assert d.search_beliefs(belief=bel_str) == bel_str
     assert d.search_beliefs(belief=bel_complex) == bel_complex
     assert d.search_beliefs(belief=bel_dicts) == bel_dicts
@@ -29,18 +39,24 @@ def test_beliefs():
     assert d.search_beliefs(belief=bel_tuples) == bel_tuples
     assert d.search_beliefs(belief=bel_float) == bel_float
     assert d.search_beliefs(belief=bel_int) == bel_int
-    assert d.search_beliefs(belief=bel) == []
+    #assert d.search_beliefs(belief=bel) == []
     d.add_belief(Belief("a"))
     assert d.search_beliefs(belief=Belief("a")) == Belief("a")
 
 def main():
-    env = crossroads("cross_env")
-    channel = cmnct.Comms("crossing")
-    drv1 = driver("drv1", objectives=[Objective("enter_lane", "South>North")])
-    drv2 = driver("drv2")
-    channel.add_agents([drv1, drv2])
-    drv1.add_focus("crossroads")
-    drv2.add_focus("crossroads")
+    env = Room("Room")
+    rbt = Robot('R1')
+    rbt.add_belief(Belief("carro",([1,2,34],3)))
+    a = rbt.has_belief(Belief("carro",([1,2,34],3)))
+    #rbt.print_beliefs()
+    print(a)
+    # env = crossroads("cross_env")
+    # channel = cmnct.Comms("crossing")
+    # drv1 = driver("drv1", objectives=[Objective("enter_lane", "South>North")])
+    # drv2 = driver("drv2")
+    # channel.add_agents([drv1, drv2])
+    # drv1.add_focus("crossroads")
+    # drv2.add_focus("crossroads")
     # comm = cmnct.comms('comm')
     # ctrl = control()
     # b1 = Belief("foo", 1)
@@ -103,4 +119,4 @@ def main():
 
 
 if __name__ == "__main__":
-    test_beliefs()
+    main()

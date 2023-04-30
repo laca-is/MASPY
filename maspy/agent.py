@@ -120,23 +120,23 @@ class Agent:
     def set_default_channel(self, channel):
         self.__default_channel = channel
 
-    def add_focus(self, environment: str) -> Environment:
+    def add_focus(self, environment: str, env_name: str = 'env') -> Environment:
         classes = []
         try:
             env = implib.import_module(environment)
         except ModuleNotFoundError:
-            print(f"{self.my_name}> No environment named '{environment}'")
+            print(f"{self.my_name}> No environment named '{env_name}'")
             return
-        self.__environments = {environment: {}}
+        self.__environments = {env_name: {}}
         for name, obj in inspect.getmembers(env):
-            if inspect.isclass(obj) and name != "env":
+            if inspect.isclass(obj) and name != "Environment":
                 lineno = inspect.getsourcelines(obj)[1]
                 classes.append((lineno, obj))
         classes.sort()
-        self.__environments[environment] = classes[0][1]()
+        self.__environments[env_name] = classes[0][1](env_name)
         del env
-        print(f"{self.my_name}> Connected to environment {environment}")
-        return self.__environments[environment]
+        print(f"{self.my_name}> Connected to environment {env_name}")
+        return self.__environments[env_name]
 
     def rm_focus(self, environment: str):
         del self.__environments[environment]
@@ -197,35 +197,29 @@ class Agent:
         except KeyError:
             return None
 
+    # TODO: Return How close it is to an existing belief
+    def has_belief(self, belief: Belief):
+        return belief in self.__beliefs
+        
     def search_beliefs(
         self,
-        belief: Optional[Belief] = None,
-        name: Optional[str] = None,
+        name: str,
         arg_size=0,
         source="percept",
-        weak_eq=False,
         all=False,
     ):
-        if name is not None:
-            belief = Belief(name, [None for _ in range(arg_size)], source)
-        elif belief is not None:
-            belief = belief
-        else:
-            raise TypeError("Expected either name or belief, found none")
-
+        belief = Belief(name, tuple([None for _ in range(arg_size)]), source)
+        
         found_beliefs = []
 
         for bel in self.__beliefs:
-            if belief == bel:
-                found_beliefs.insert(0, belief)
-            elif weak_eq and bel.weak_eq(belief):
-                found_beliefs.append(bel)
-        if all:
-            return found_beliefs
-        elif found_beliefs:
-            return found_beliefs[0]
-        else:
-            return []
+            if bel.weak_eq(belief):
+                if all:
+                    found_beliefs.append(bel)
+                else:
+                    return bel
+                
+        return found_beliefs
 
     def _run_plan(self, plan):
         sleep(0.2)
@@ -292,7 +286,7 @@ class Agent:
 
     def prepare_msg(self, target: str, act: str, msg: MSG, channel: str = None):
         channel = self.__default_channel
-        msg.source = self.my_name
+        msg = msg.update(source = self.my_name)
         match (act, msg):
             case ("askOne" | "askAll", belief) if isinstance(belief, Belief):
                 msg = Ask(belief, source=self.my_name)
