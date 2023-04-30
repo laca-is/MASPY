@@ -8,13 +8,30 @@ from crossroads import crossroads
 
 
 def test_beliefs():
-    print(Belief("foo", "abc"))
-    print(Belief("foo", 1))
-    print(Belief("foo", 1.0))
-    print(Belief("foo", 1j))
-    print(Belief("foo", [1, [1, 2]]))
-    print(Belief("foo", (1, 2, 3, [2, 3, {1}], {"a": "a"})))
-    print(Belief("foo", {1: 1, "a": "foo", (1, 2): "teste"}))
+    bel_str = Belief("foo", "abc")
+    bel_int = Belief("foo", 1)
+    bel_float = Belief("foo", 1.0)
+    bel_complex = Belief("foo", 1j)
+    bel_lists = Belief("foo", [1, [1, 2]])
+    bel_tuples = Belief("foo", (1, 2, 3, [2, 3, {1}], {"a": "a"}))
+    bel_dicts = Belief("foo", {1: 1, "a": "foo", (1, 2): "teste"})
+
+    beliefs = set(
+        [bel_str, bel_int, bel_float, bel_complex, bel_lists, bel_tuples, bel_dicts]
+    )
+    bel = Belief("foo", [1, 2])
+
+    d = driver("d", beliefs)
+    assert d.search_beliefs(belief=bel_str) == bel_str
+    assert d.search_beliefs(belief=bel_complex) == bel_complex
+    assert d.search_beliefs(belief=bel_dicts) == bel_dicts
+    assert d.search_beliefs(belief=bel_lists) == bel_lists
+    assert d.search_beliefs(belief=bel_tuples) == bel_tuples
+    assert d.search_beliefs(belief=bel_float) == bel_float
+    assert d.search_beliefs(belief=bel_int) == bel_int
+    assert d.search_beliefs(belief=bel) == []
+    d.add_belief(Belief("a"))
+    assert d.search_beliefs(belief=Belief("a")) == Belief("a")
 
 
 def main():
