@@ -7,17 +7,49 @@ from maspy.error import (
     RunPlanError,
 )
 from maspy.system_control import Control
-from typing import List, Optional, Dict, Tuple, Any
+from typing import List, Optional, Dict, Set, Tuple, Any
 from collections.abc import Iterable, Callable
 from time import sleep
 import importlib as implib
 
 
-@dataclass
+@dataclass(eq=True, frozen=True, unsafe_hash=True)
 class Belief:
     key: str
-    args: list = field(default_factory=list)
+    args: tuple = field(default_factory=tuple)
     source: str = "percept"
+
+    def __post_init__(self):
+        match self.args:
+            case Iterable():
+                object.__setattr__(self, "args", tuple(self.args))
+            case _:
+                object.__setattr__(self, "args", tuple([self.args]))
+
+    def weak_eq(self, other: "Belief"):
+        return (
+            self.key == other.key
+            and len(self.args) == len(other.args)
+            and self.source == other.source
+        )
+
+    def update(self, key: str = None, args=None, source=None) -> "Belief":
+        if key is not None:
+            new_name = key
+        else:
+            new_name = self.key
+
+        if args is not None:
+            new_args = args
+        else:
+            new_args = self.args
+
+        if source is not None:
+            new_source = source
+        else:
+            new_source = self.source
+
+        return Belief(new_name, new_args, new_source)
 
 
 @dataclass
@@ -69,15 +101,21 @@ class Agent:
     def rm_focus(self, environment: str):
         del self.__environments[environment]
 
-    def add_belief(self, belief: Belief):
+    def add_belief(self, belief: Iterable[Belief] | Belief):
         beliefs = self._clean_beliefs(belief)
+        for belief in beliefs:
+            self.__beliefs.add(belief)
 
-        # TODO: Change beliefs for a set
-        if beliefs not in self.__beliefs:
-            self.__beliefs.append(beliefs)
-
-    def rm_belief(self, belief: Belief):
-        self.__beliefs.remove(belief)
+    def rm_belief(self, belief: Iterable[Belief] | Belief):
+        match belief:
+            case Iterable():
+                for b in belief:
+                    try:
+                        self.__beliefs.remove(b)
+                    except KeyError:
+                        pass
+            case _:
+                self.__beliefs.remove(belief)
 
     def add_objective(self, objective: Iterable[Objective] | Objective):
         objectives = self._clean_objectives(objective)
@@ -103,10 +141,30 @@ class Agent:
         for belief in self.__beliefs:
             print(belief)
 
-    def search_beliefs(self, belief, all=False):
+    def search_beliefs(
+        self,
+        name: Optional[str] = None,
+        belief: Optional[Belief] = None,
+        arg_size=0,
+        source="percept",
+        all=False,
+    ):
+        if name is not None:
+            belief = Belief(name, [None for _ in range(arg_size)], source)
+        elif belief is not None:
+            belief = belief
+        else:
+            raise TypeError("Expected either name or belief, found none")
+
         found_beliefs = []
+
         for bel in self.__beliefs:
-            if bel.key == belief.key and len(bel.args) == len(belief.args):
+            if belief == bel:
+                if not all:
+                    return belief
+                else:
+                    found_beliefs.append(belief)
+            elif bel.weak_eq(belief):
                 if not all:
                     return bel
                 else:
@@ -216,19 +274,19 @@ class Agent:
     # TODO: should invalid arguments be an error or a warning?
     def _clean_beliefs(
         self, beliefs: Optional[Iterable[Belief] | Belief]
-    ) -> List[Belief]:
+    ) -> Set[Belief]:
         match beliefs:
             case None:
-                return []
+                return {}
             case Belief():
-                return [beliefs]
+                return {beliefs}
             case Iterable():
                 for belief in beliefs:
                     if not isinstance(belief, Belief):
                         raise InvalidBeliefError(
                             f"Expected beliefs to have type Iterable[Belief] | Belief, recieved Iterable[{type(belief).__name__}]"
                         )
-                return list(beliefs)
+                return set(beliefs)
             case _:
                 raise InvalidBeliefError(
                     f"Expected beliefs to have type Iterable[Belief] | Belief, recieved {type(beliefs).__name__}"

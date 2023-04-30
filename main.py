@@ -6,16 +6,23 @@ from driver import driver
 from manager import manager
 import importlib as imp
 
+
 def main():
-
     # comm = cmnct.comms('comm')
-    #ctrl = control()
-
-    # drv3 = driver('drv3', 1 ,[Objective('a')], plans=('a', lambda agent, src: print('Hello World agent')))
+    # ctrl = control()
+    b1 = Belief("foo", 1)
+    b2 = Belief("foo", 2)
+    b3 = Belief("foo", [3, 4])
+    drv = driver(
+        "drv3",
+        [b1, b2, b3, b1],
+        [Objective("a")],
+        plans=("a", lambda agent, src: print("Hello World agent")),
+    )
     # drv2 = driver('drv2')
     # drv1 = driver('drv1', [Belief('price',[10])], [Objective('offer')])
     # Control().start_all_agents()
-    
+
     # mgr = manager('mgr')
     # ctrl.add_agents([drv1,drv2,drv4])
     # ctrl.add_agents(mgr)
@@ -27,15 +34,14 @@ def main():
     # v['any'].update({'vaga': {}})
     # v['any']
     # print(v)
-    
+
     # a = cmnct.comms('Publico')
     # b = cmnct.comms('Publico')
     # c = cmnct.comms()
     # print(a is b)
     # print(a is c)
     # print(b is c)
-    
-    
+
     # imprt = imp.import_module('maspy.''environment')
     # env = imprt.env()
     # env.create_fact('vagas',{1 , 2, 'a', 4},'gerente')
@@ -43,12 +49,13 @@ def main():
     # env.reduce_fact('vagas','a','gerente')
 
     # print(env.get_facts('all'))
-    
-    #drv = driver('driver')
-    #drv.recieve_msg('World','achieve',Objective('test_focus'))
-    #drv.reasoning()
-    
+
+    # drv = driver('driver')
+    # drv.recieve_msg('World','achieve',Objective('test_focus'))
+    # drv.reasoning()
+
     print("END")
+
 
 if __name__ == "__main__":
     main()
