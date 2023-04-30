@@ -7,14 +7,24 @@ import importlib as imp
 from crossroads import crossroads
 
 
+def test_beliefs():
+    print(Belief("foo", "abc"))
+    print(Belief("foo", 1))
+    print(Belief("foo", 1.0))
+    print(Belief("foo", 1j))
+    print(Belief("foo", [1, [1, 2]]))
+    print(Belief("foo", (1, 2, 3, [2, 3, {1}], {"a": "a"})))
+    print(Belief("foo", {1: 1, "a": "foo", (1, 2): "teste"}))
+
+
 def main():
-    env = crossroads('cross_env')
-    channel = cmnct.Comms('crossing')
-    drv1 = driver('drv1', objectives=[Objective('enter_lane','South>North')])
-    drv2 = driver('drv2')
-    channel.add_agents([drv1,drv2])
-    drv1.add_focus('crossroads')
-    drv2.add_focus('crossroads')
+    env = crossroads("cross_env")
+    channel = cmnct.Comms("crossing")
+    drv1 = driver("drv1", objectives=[Objective("enter_lane", "South>North")])
+    drv2 = driver("drv2")
+    channel.add_agents([drv1, drv2])
+    drv1.add_focus("crossroads")
+    drv2.add_focus("crossroads")
     # comm = cmnct.comms('comm')
     # ctrl = control()
     # b1 = Belief("foo", 1)
@@ -48,8 +58,7 @@ def main():
     # print(a is b)
     # print(a is c)
     # print(b is c)
-    
-    
+
     # imprt = imp.import_module('maspy.''environment')
     # env = imprt.env()
     # env.create_fact('vagas',{1 , 2, 'a', 4},'gerente')
@@ -57,12 +66,10 @@ def main():
     # env.reduce_fact('vagas','a','gerente')
 
     # print(env.get_facts('all'))
-    
-    #drv = driver('driver')
-    #drv.recieve_msg('World','achieve',Objective('test_focus'))
-    #drv.reasoning()
-    
-    
+
+    # drv = driver('driver')
+    # drv.recieve_msg('World','achieve',Objective('test_focus'))
+    # drv.reasoning()
 
     # imprt = imp.import_module('maspy.''environment')
     # env = imprt.env()
@@ -80,4 +87,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    test_beliefs()

@@ -22,6 +22,10 @@ class Belief:
 
     def __post_init__(self):
         match self.args:
+            case list() | dict() | str():
+                object.__setattr__(self, "args", tuple([self.args]))
+            case tuple():
+                pass
             case Iterable():
                 object.__setattr__(self, "args", tuple(self.args))
             case _:
@@ -91,24 +95,24 @@ class Agent:
         self.__objectives = self._clean_objectives(objectives)
         self.__plans = self._clean_plans(plans)
         self.__plans.update({"reasoning": self.reasoning})
-        
+
         self.__default_channel = None
-        self.paused_agent = False   
+        self.paused_agent = False
         print(f"{self.my_name}> Initialized")
-    
+
     def set_default_channel(self, channel):
         self.__default_channel = channel
-    
+
     def add_focus(self, environment: str) -> Environment:
         classes = []
         try:
             env = implib.import_module(environment)
-        except(ModuleNotFoundError):
+        except ModuleNotFoundError:
             print(f"{self.my_name}> No environment named '{environment}'")
             return
-        self.__environments = {environment:{}}
+        self.__environments = {environment: {}}
         for name, obj in inspect.getmembers(env):
-            if inspect.isclass(obj) and name != 'env':
+            if inspect.isclass(obj) and name != "env":
                 lineno = inspect.getsourcelines(obj)[1]
                 classes.append((lineno, obj))
         classes.sort()
@@ -116,7 +120,7 @@ class Agent:
         del env
         print(f"{self.my_name}> Connected to environment {environment}")
         return self.__environments[environment]
-    
+
     def rm_focus(self, environment: str):
         del self.__environments[environment]
 
@@ -173,8 +177,8 @@ class Agent:
             for belief in self.__beliefs[belf_key]:
                 if len(belief.args) == n_args:
                     return belief
-        except(KeyError):
-            return None    
+        except KeyError:
+            return None
 
     def search_beliefs(
         self,
@@ -269,13 +273,13 @@ class Agent:
             case _:
                 TypeError(f"Unknown type of message {act} | {msg}")
 
-    def prepare_msg(self, target: str, act: str, msg: MSG, channel: str=None):
+    def prepare_msg(self, target: str, act: str, msg: MSG, channel: str = None):
         channel = self.__default_channel
         msg.source = self.my_name
         match (act, msg):
             case ("askOne" | "askAll", belief) if isinstance(belief, Belief):
                 msg = Ask(belief, source=self.my_name)
-                
+
         print(f"{self.my_name}> Sending to {target} : {act} -> {msg}")
         self.send_msg(target, act, msg, channel)
 
@@ -290,7 +294,7 @@ class Agent:
             #  -um plano eh (guard(),plano())
             self.execution()
         self.paused_agent = True
-            
+
     def perception(self):
         for env_name in self.__environments:
             print(f"{self.my_name}> Percepting env {env_name}")
