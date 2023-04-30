@@ -33,7 +33,6 @@ def test_beliefs():
     d.add_belief(Belief("a"))
     assert d.search_beliefs(belief=Belief("a")) == Belief("a")
 
-
 def main():
     env = crossroads("cross_env")
     channel = cmnct.Comms("crossing")
