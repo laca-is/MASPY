@@ -144,6 +144,9 @@ class Agent:
     def rm_focus(self, environment: str):
         del self.__environments[environment]
 
+    def get_env(self, env_name: str):
+        return self.__environments[env_name]
+
     def add_belief(self, belief: Iterable[Belief] | Belief):
         beliefs = self._clean_beliefs(belief)
         print(f"{self.my_name}> Adding {belief}")
@@ -174,7 +177,7 @@ class Agent:
 
     def add_objective(self, objective: Iterable[Objective] | Objective):
         objectives = self._clean_objectives(objective)
-
+        print(f"{self.my_name}> Adding {objectives}")
         if objectives not in self.__objectives:
             self.__objectives.append(objective)
 
@@ -221,7 +224,7 @@ class Agent:
         arg_size=0,
         source="percept",
         all=False,
-    ):
+    ) -> Optional[Belief] | List[Belief]:
         belief = Belief(name, tuple([None for _ in range(arg_size)]), source)
         
         found_beliefs = []
@@ -233,8 +236,11 @@ class Agent:
                         found_beliefs.append(bel)
                     else:
                         return bel
-                
-        return found_beliefs
+                    
+        if found_beliefs:
+            return found_beliefs
+        else:
+            return None
 
     def _run_plan(self, plan):
         sleep(0.2)
