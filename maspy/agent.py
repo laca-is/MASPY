@@ -120,6 +120,9 @@ class Agent:
     def set_default_channel(self, channel):
         self.__default_channel = channel
 
+    def add_focus_env(self, env_instance, env_name: str = 'env'):
+        self.__environments[env_name] = env_instance
+
     def add_focus(self, environment: str, env_name: str = 'env') -> Environment:
         classes = []
         try:
@@ -143,19 +146,31 @@ class Agent:
 
     def add_belief(self, belief: Iterable[Belief] | Belief):
         beliefs = self._clean_beliefs(belief)
-        for belief in beliefs:
-            self.__beliefs.add(belief)
+        print(f"{self.my_name}> Adding {belief}")
+        for key, value in beliefs.items():
+            if key in self.__beliefs and isinstance(value, dict):
+                for inner_key, inner_value in value.items():
+                    if inner_key in self.__beliefs[key] and isinstance(inner_value, set):
+                        self.__beliefs[key][inner_key].update(inner_value)
+            else:
+                self.__beliefs[key] = value
 
-    def rm_belief(self, belief: Iterable[Belief] | Belief):
-        match belief:
-            case Iterable():
-                for b in belief:
-                    try:
-                        self.__beliefs.remove(b)
-                    except KeyError:
-                        pass
-            case _:
-                self.__beliefs.remove(belief)
+    def rm_belief(self, belief: Iterable[Belief] | Belief, purge_source=False):
+        try:
+            match belief:
+                case Iterable():
+                    for bel in belief:
+                        try:
+                            self.__beliefs[bel.source][bel.key].remove(bel)
+                        except KeyError:
+                            pass
+                case _:
+                    if purge_source:
+                        del self.__beliefs[belief.source]
+                    else:
+                        self.__beliefs[belief.source][belief.key].remove(belief)
+        except KeyError:
+            print(f"{self.my_name}> {belief} doesn't exist | purge({purge_source})")
 
     def add_objective(self, objective: Iterable[Objective] | Objective):
         objectives = self._clean_objectives(objective)
@@ -178,8 +193,7 @@ class Agent:
         del self.__plans[plan.key]
 
     def print_beliefs(self):
-        for belief in self.__beliefs:
-            print(belief)
+        print(self.__beliefs)
 
     def get_like_belief(self, belf, n_args=0):
         if type(belf) == Belief:
@@ -199,7 +213,7 @@ class Agent:
 
     # TODO: Return How close it is to an existing belief
     def has_belief(self, belief: Belief):
-        return belief in self.__beliefs
+        return belief in self.__beliefs.get(Belief.source, {}).get(belief.key, {})
         
     def search_beliefs(
         self,
@@ -212,12 +226,13 @@ class Agent:
         
         found_beliefs = []
 
-        for bel in self.__beliefs:
-            if bel.weak_eq(belief):
-                if all:
-                    found_beliefs.append(bel)
-                else:
-                    return bel
+        if belief.source in self.__beliefs and belief.key in self.__beliefs[belief.source]:
+            for bel in self.__beliefs[belief.source][belief.key]:
+                if bel.weak_eq(belief):
+                    if all:
+                        found_beliefs.append(bel)
+                    else:
+                        return bel
                 
         return found_beliefs
 
@@ -304,13 +319,18 @@ class Agent:
             #  -funcao com condicoes para o plano rodar
             #  -um plano eh (guard(),plano())
             self.execution()
+            sleep(1)
         self.paused_agent = True
 
     def perception(self):
         for env_name in self.__environments:
             print(f"{self.my_name}> Percepting env {env_name}")
-            self.__environments[env_name].perception()
+            perceived = self.__environments[env_name].perception()
 
+            self.rm_belief(Belief(None,None,env_name),True)
+            for key, value in perceived.items():
+                self.add_belief(Belief(key,value,env_name))
+               
     def execution(self):
         if not self.__objectives:
             return None
@@ -330,20 +350,29 @@ class Agent:
     ) -> Set[Belief]:
         match beliefs:
             case None:
-                return {}
+                return dict()
             case Belief():
-                return {beliefs}
+                return {beliefs.source: {beliefs.key: beliefs}}
             case Iterable():
+                belief_dict = dict()
                 for belief in beliefs:
                     if not isinstance(belief, Belief):
                         raise InvalidBeliefError(
                             f"Expected beliefs to have type Iterable[Belief] | Belief, recieved Iterable[{type(belief).__name__}]"
                         )
-                return set(beliefs)
+                    if belief.source in belief_dict:
+                        if belief.key in belief_dict[belief.source]:
+                            belief_dict[belief.source][belief.key].add(belief)
+                        else:
+                            belief_dict[belief.source].update({belief.key: {belief}})
+                    else:
+                        belief_dict.update({belief.source: {belief.key: {belief}}})
+
+                return belief_dict
             case _:
                 raise InvalidBeliefError(
                     f"Expected beliefs to have type Iterable[Belief] | Belief, recieved {type(beliefs).__name__}"
-                )
+                )    
 
     def _clean_objectives(
         self, objectives: Optional[Iterable[Objective] | Objective]
@@ -414,3 +443,4 @@ class Agent:
                     f"Expected plans to have type Dict[str, Callable] | Iterable[Tuple[str, Callable]] | Tuple(str, Callable), recieved {type(plans).__name__}"
                 )
         return {}
+

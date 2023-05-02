@@ -38,7 +38,7 @@ class Environment(metaclass=EnvironmentMultiton):
         self._roles = {"any"}
     
     def perception(self):
-        return self.get_facts("all")
+        return self._get_facts("all")
     
     def add_channel(self, channel):
         self.__env_channel = channel
@@ -65,7 +65,7 @@ class Environment(metaclass=EnvironmentMultiton):
 
         if role in self._facts:
             if name not in self._facts[role]:
-                self._facts[role] = {name : data}
+                self._facts[role].update({name : data})
             else:
                 print(f"{self._my_name}> Fact *{name}:{role}* already created")
         else:
@@ -146,3 +146,7 @@ class Environment(metaclass=EnvironmentMultiton):
                 for fact in self._facts[role]:
                     found_facts[fact] = self._facts[role][fact]
         return found_facts
+
+
+# dirt : {1: (0,1), 2: (3, 4)}
+# room_size : (5,5)
