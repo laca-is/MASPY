@@ -102,7 +102,9 @@ class Agent:
             | Iterable[Tuple[str, Callable[..., Any]]]
             | Tuple[str, Callable[..., Any]]
         ],
+        full_log = False
     ):
+        self.full_log = full_log
         self.my_name = name
         Control().add_agents(self)
 
@@ -149,12 +151,14 @@ class Agent:
 
     def add_belief(self, belief: Iterable[Belief] | Belief):
         beliefs = self._clean_beliefs(belief)
-        print(f"{self.my_name}> Adding {belief}")
+        print(f"{self.my_name}> Adding {belief}") if self.full_log else ...
         for key, value in beliefs.items():
             if key in self.__beliefs and isinstance(value, dict):
                 for inner_key, inner_value in value.items():
                     if inner_key in self.__beliefs[key] and isinstance(inner_value, set):
-                        self.__beliefs[key][inner_key].update(inner_value)
+                        self.__beliefs[key][inner_key].add(inner_value)
+                    else:
+                        self.__beliefs[key][inner_key] = value 
             else:
                 self.__beliefs[key] = value
 
@@ -177,7 +181,7 @@ class Agent:
 
     def add_objective(self, objective: Iterable[Objective] | Objective):
         objectives = self._clean_objectives(objective)
-        print(f"{self.my_name}> Adding {objectives}")
+        print(f"{self.my_name}> Adding {objectives}") if self.full_log else ...
         if objectives not in self.__objectives:
             self.__objectives.append(objective)
 
@@ -195,9 +199,18 @@ class Agent:
     def rm_plan(self, plan):
         del self.__plans[plan.key]
 
+    @property
     def print_beliefs(self):
         print(self.__beliefs)
 
+    @property
+    def print_objectives(self):
+        print(self.__objectives)
+    
+    @property
+    def print_plans(self):
+        print(self.__plans)
+    
     def get_like_belief(self, belf, n_args=0):
         if type(belf) == Belief:
             belf_key = belf.key
@@ -226,7 +239,7 @@ class Agent:
         all=False,
     ) -> Optional[Belief] | List[Belief]:
         belief = Belief(name, tuple([None for _ in range(arg_size)]), source)
-        
+
         found_beliefs = []
 
         if belief.source in self.__beliefs and belief.key in self.__beliefs[belief.source]:
@@ -245,44 +258,42 @@ class Agent:
     def _run_plan(self, plan):
         sleep(0.2)
         print(
-            f"{self.my_name}> Running plan(key='{plan.key}', args={plan.args}, source={plan.source})"
-        )
+            f"{self.my_name}> Running Plan(key='{plan.key}', args={plan.args}, source={plan.source})"
+        )  if self.full_log else ...
         try:
             return self.__plans[plan.key](self, plan.source, *plan.args)
-        except (TypeError, KeyError):
-            print(f"{self.my_name}> Plan {plan} doesn't exist")
+        except KeyError:
+            print(f"{self.my_name}> Plan(key='{plan.key}', args={plan.args}, source={plan.source}) doesn't exist")
             raise RunPlanError
+        # except TypeError:
+        #     print(f"{self.my_name}> Invalid Arguments in Plan(key='{plan.key}', args={plan.args}, source={plan.source})")
+        #     raise RunPlanError
 
     # TODO: implement stoping plan
     def _stop_plan(self, plan):
         print(
             f"{self.my_name}> Stoping plan(key='{plan.key}', args={plan.args}, source={plan.source})"
-        )
+        )  if self.full_log else ...
         pass
 
     def recieve_msg(self, sender, act, msg: MSG):
         if not act == "env_tell":
-            print(f"{self.my_name}> Received from {sender} : {act} -> {msg}")
+            print(f"{self.my_name}> Received from {sender} : {act} -> {msg}")  if self.full_log else ...
         match (act, msg):
             case ("tell", belief) if isinstance(belief, Belief):
                 self.add_belief(belief)
-                print(f"{self.my_name}> Adding {belief}")
 
             case ("env_tell", belief) if isinstance(belief, Belief):
                 self.add_belief(belief)
-                print(f"{self.my_name}> Adding Env Belief")
 
             case ("untell", belief) if isinstance(belief, Belief):
                 self.rm_belief(belief)
-                print(f"{self.my_name}> Removing {belief}")
 
             case ("achieve", objective) if isinstance(objective, Objective):
-                print(f"{self.my_name}> Adding {objective}")
                 self.add_objective(objective)
 
             case ("unachieve", objective) if isinstance(objective, Objective):
                 self.rm_objective(objective)
-                print(f"{self.my_name}> Removing {objective}")
 
             case ("askOne", ask) if isinstance(ask, Ask):
                 found_belief = self.search_beliefs(ask.belief)
@@ -312,7 +323,7 @@ class Agent:
             case ("askOne" | "askAll", belief) if isinstance(belief, Belief):
                 msg = Ask(belief, source=self.my_name)
 
-        print(f"{self.my_name}> Sending to {target} : {act} -> {msg}")
+        print(f"{self.my_name}> Sending to {target} : {act} -> {msg}") if self.full_log else ...
         self.send_msg(target, act, msg, channel)
 
     def send_msg(self, target: str, act: str, msg: MSG, channel: str):
@@ -330,18 +341,18 @@ class Agent:
 
     def perception(self):
         for env_name in self.__environments:
-            print(f"{self.my_name}> Percepting env {env_name}")
+            print(f"{self.my_name}> Percepting '{env_name}'") if self.full_log else ...
             perceived = self.__environments[env_name].perception()
 
             self.rm_belief(Belief(None,None,env_name),True)
             for key, value in perceived.items():
                 self.add_belief(Belief(key,value,env_name))
-               
+    
     def execution(self):
         if not self.__objectives:
             return None
         objective = self.__objectives[-1]
-        print(f"{self.my_name}> Execution of {objective}")
+        print(f"{self.my_name}> Execution of {objective}") if self.full_log else ...
         try:
             result = self._run_plan(objective)
             if objective in self.__objectives:
@@ -358,7 +369,7 @@ class Agent:
             case None:
                 return dict()
             case Belief():
-                return {beliefs.source: {beliefs.key: beliefs}}
+                return {beliefs.source: {beliefs.key: {beliefs}}}
             case Iterable():
                 belief_dict = dict()
                 for belief in beliefs:

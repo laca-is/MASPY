@@ -7,6 +7,7 @@ from examples.crossing_negotiation.driver import driver
 from examples.crossing_negotiation.crossroads import crossroads
 from examples.garbage_cleaner.robot import Robot
 from examples.garbage_cleaner.room import Room
+from time import sleep
 
 def test_beliefs():
     bel_str = Belief("foo", "abc")
@@ -43,13 +44,28 @@ def test_beliefs():
     d.add_belief(Belief("a"))
     assert d.search_beliefs(belief=Belief("a")) == Belief("a")
 
+def cleaner_robot():
+    env = Room("room")
+    rbt = Robot('cleaner')
+
 def main():
-    env = Room("Room")
-    rbt = Robot('R1')
-    rbt.add_belief(Belief("carro",([1,2,34],3)))
-    a = rbt.has_belief(Belief("carro",([1,2,34],3)))
+    # ag = Agent(
+    #     "hello_agent", 
+    #     beliefs=None,
+    #     objectives=Objective("say_hello"), 
+    #     plans=[
+    #         ('say_hello', lambda _self, _src: print("Hello World")),
+    #         ('say_by', lambda _self, _src: print("Adios Mundo Cruel") )
+    #     ]
+    # )
+    # Control().start_agents(ag)
+    # sleep(1)
+    # ag.add_objective(Objective("say_by"))
+    
+    # rbt.add_belief(Belief("carro",([1,2,34],3)))
+    # a = rbt.has_belief(Belief("carro",([1,2,34],3)))
     #rbt.print_beliefs()
-    print(a)
+    # print(a)
     # env = crossroads("cross_env")
     # channel = cmnct.Comms("crossing")
     # drv1 = driver("drv1", objectives=[Objective("enter_lane", "South>North")])
@@ -119,4 +135,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    cleaner_robot()
