@@ -17,7 +17,6 @@ class Room(Environment):
     def clean_position(self, agent, position):
         print(f"{self._my_name}> {agent} is cleaning position {position}")
         dirt_status = self.get_fact_value("dirt")
-        print(dirt_status)
         if dirt_status[position] is False:
             dirt_status[position] = True # changes the dict inside fact
         #self._update_fact("dirt",dirt_status) # useless cause of above
@@ -54,17 +53,18 @@ class Robot(Agent):
                     
         if target is None:
             print(f"{self.my_name}> All dirt is cleaned")
+            #self.rm_belief(Belief("room_is_dirty"))
+            #self.add_belief(Belief("room_is_clean"))
             print("*** Finished Cleaning ***")
-            return
-        
-        print(f"{self.my_name}> Moving to {target}")
-        self.add_objective(Objective("move",[target]))
+        else:
+            print(f"{self.my_name}> Moving to {target}")
+            self.add_objective(Objective("move",[target]))
                                  
     def clean(self,src):
         if self.has_belief(Belief("room_is_dirty")):
             self.get_env("Room").clean_position(self.my_name, self.position)
             self.add_objective(Objective("decide_move"))
-
+    
     def move(self,src,target):
         x, y = self.position
         
@@ -96,7 +96,7 @@ def main():
     rbt = Robot('R1', initial_env=env, full_log=False)
     Control().start_agents(rbt)
     env.add_dirt((3,1))
-    rbt.add_objective(Objective("decide_move"))
+    #rbt.add_objective(Objective("decide_move"))
 
 if __name__ == "__main__":
     main()

@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, astuple
 from maspy.environment import Environment
 from maspy.error import (
     InvalidBeliefError,
@@ -149,9 +149,16 @@ class Agent:
     def get_env(self, env_name: str):
         return self.__environments[env_name]
 
+    def simple_add(self, type: Belief | Objective, key: str, args: any = None, source: str = None):
+        match type:
+            case Belief() | "Belief" | "belief":
+                self.add_belief(Belief(key,args,source))
+            case Objective() | "Objective" | "objective":
+                self.add_objective(Objective(key,args,source))
+            
     def add_belief(self, belief: Iterable[Belief] | Belief):
         beliefs = self._clean_beliefs(belief)
-        print(f"{self.my_name}> Adding {belief}") if self.full_log else ...
+        print(f"{self.my_name}> Adding {beliefs}") if self.full_log else ...
         for key, value in beliefs.items():
             if key in self.__beliefs and isinstance(value, dict):
                 for inner_key, inner_value in value.items():
@@ -178,7 +185,7 @@ class Agent:
                         self.__beliefs[belief.source][belief.key].remove(belief)
         except KeyError:
             print(f"{self.my_name}> {belief} doesn't exist | purge({purge_source})")
-
+    
     def add_objective(self, objective: Iterable[Objective] | Objective):
         objectives = self._clean_objectives(objective)
         print(f"{self.my_name}> Adding {objectives}") if self.full_log else ...
@@ -369,7 +376,17 @@ class Agent:
             case None:
                 return dict()
             case Belief():
-                return {beliefs.source: {beliefs.key: {beliefs}}}
+                key, args, source = astuple(beliefs)
+                if source is None:
+                    if not args or args[0] is None:
+                        belief = Belief(key)
+                    else:
+                        belief = Belief(key,args)
+                elif not args or args[0] is None:
+                    belief = Belief(key,source=source)
+                else:
+                    belief = Belief(key,args,source)
+                return {belief.source: {belief.key: {belief}}}
             case Iterable():
                 belief_dict = dict()
                 for belief in beliefs:
@@ -398,6 +415,16 @@ class Agent:
             case None:
                 return []
             case Objective():
+                # key, args, source = astuple(objectives)
+                # if source is None:
+                #     if not args or args is None:
+                #         objective = Objective(key)
+                #     else:
+                #         objective = Objective(key,args)
+                # elif not args or args is None:
+                #     objective = Objective(key,source=source)
+                # else:
+                #     objective = Objective(key,args,source)
                 return [objectives]
             case Iterable():
                 for objective in objectives:
