@@ -1,23 +1,6 @@
 from threading import Lock
 from typing import Any, Dict, Optional, Set
 
-"""
-gerenciar 
-    caracteristicas do ambiente
-    artefato do ambiente
-    cargo de agentes neste ambiente
-    comunicacao do ambiente
-"""
-
-"""
-Get perception:
-    verificar situacao do ambiente
-        -olhar todas caracteristicas
-        -considerar cargo do agente
-
-"""
-
-
 class EnvironmentMultiton(type):
     _instances: Dict[str, "Environment"] = {}
     _lock: Lock = Lock()

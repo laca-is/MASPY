@@ -17,24 +17,33 @@ import inspect
 @dataclass(eq=True, frozen=True)
 class Belief:
     key: str
-    args: tuple = field(default_factory=tuple)
+    _args: tuple = field(default_factory=tuple)
     source: str = "percept"
 
+    @property
+    def args(self):
+        if len(self._args) > 1:
+            return self._args
+        elif len(self._args) == 1:
+            return self._args[0]
+        else:
+            return tuple()
+
     def __post_init__(self):
-        match self.args:
+        match self._args:
             case list() | dict() | str():
-                object.__setattr__(self, "args", tuple([self.args]))
+                object.__setattr__(self, "_args", tuple([self._args]))
             case tuple():
                 pass
             case Iterable():
-                object.__setattr__(self, "args", tuple(self.args))
+                object.__setattr__(self, "_args", tuple(self._args))
             case _:
-                object.__setattr__(self, "args", tuple([self.args]))
+                object.__setattr__(self, "_args", tuple([self._args]))
 
     def weak_eq(self, other: "Belief"):
         return (
             self.key == other.key
-            and len(self.args) == len(other.args)
+            and len(self._args) == len(other._args)
             and self.source == other.source
         )
 
@@ -47,7 +56,7 @@ class Belief:
         if args is not None:
             new_args = args
         else:
-            new_args = self.args
+            new_args = self._args
 
         if source is not None:
             new_source = source
@@ -61,7 +70,7 @@ class Belief:
     def __hash__(self) -> int:
         args_hashable = []
         unhashable_types = {}
-        for arg in self.args:
+        for arg in self._args:
             arg_dict = type(arg).__dict__
             if arg_dict.get("__hash__"):
                 args_hashable.append(arg)
@@ -84,8 +93,73 @@ class Ask:
 @dataclass
 class Objective:
     key: str
-    args: list = field(default_factory=list)
+    _args: tuple = field(default_factory=tuple)
     source: str = "percept"
+
+    @property
+    def args(self):
+        if len(self._args) > 1:
+            return self._args
+        elif len(self._args) == 1:
+            return self._args[0]
+        else:
+            return tuple()
+
+    def __post_init__(self):
+        match self._args:
+            case list() | dict() | str():
+                object.__setattr__(self, "_args", tuple([self._args]))
+            case tuple():
+                pass
+            case Iterable():
+                object.__setattr__(self, "_args", tuple(self._args))
+            case _:
+                object.__setattr__(self, "_args", tuple([self._args]))
+
+    def weak_eq(self, other: "Objective"):
+        return (
+            self.key == other.key
+            and len(self._args) == len(other._args)
+            and self.source == other.source
+        )
+
+    def update(self, key: str = None, args=None, source=None) -> "Objective":
+        if key is not None:
+            new_name = key
+        else:
+            new_name = self.key
+
+        if args is not None:
+            new_args = args
+        else:
+            new_args = self._args
+
+        if source is not None:
+            new_source = source
+        else:
+            new_source = self.source
+
+        return Objective(new_name, new_args, new_source)
+
+    # implementing hash for Belief is fine, it is impossible to change something inside
+    # without creating a new object therefore, Belief can be used in dict and sets
+    def __hash__(self) -> int:
+        args_hashable = []
+        unhashable_types = {}
+        for arg in self._args:
+            arg_dict = type(arg).__dict__
+            if arg_dict.get("__hash__"):
+                print("A")
+                args_hashable.append(arg)
+            elif isinstance(arg, (List, Dict, Set)):
+                print("B")
+                args_hashable.append(repr(arg))
+            else:
+                raise TypeError(f"Unhashable type: {type(arg)}")
+        args_hashable = tuple(args_hashable)
+
+        return hash((self.key, args_hashable, self.source))
+
 
 
 MSG = Belief | Ask | Objective
@@ -149,11 +223,12 @@ class Agent:
     def get_env(self, env_name: str):
         return self.__environments[env_name]
 
-    def simple_add(self, type: Belief | Objective, key: str, args: any = None, source: str = None):
+    def simple_add(self, type: Belief | Objective | str, key: str, args: Any = tuple(), source: str = "percept"):
+        type = type.lower()
         match type:
-            case Belief() | "Belief" | "belief":
+            case Belief() | "belief" | "bel" | "b":
                 self.add_belief(Belief(key,args,source))
-            case Objective() | "Objective" | "objective":
+            case Objective() | "objective" | "obj" | "o":
                 self.add_objective(Objective(key,args,source))
             
     def add_belief(self, belief: Iterable[Belief] | Belief):
@@ -189,8 +264,15 @@ class Agent:
     def add_objective(self, objective: Iterable[Objective] | Objective):
         objectives = self._clean_objectives(objective)
         print(f"{self.my_name}> Adding {objectives}") if self.full_log else ...
-        if objectives not in self.__objectives:
-            self.__objectives.append(objective)
+        for key, value in objectives.items():
+            if key in self.__objectives and isinstance(value, dict):
+                for inner_key, inner_value in value.items():
+                    if inner_key in self.__objectives[key] and isinstance(inner_value, set):
+                        self.__objectives[key][inner_key].add(inner_value)
+                    else:
+                        self.__objectives[key][inner_key] = value 
+            else:
+                self.__objectives[key] = value
 
             if self.paused_agent:
                 self.paused_agent = False
@@ -218,21 +300,21 @@ class Agent:
     def print_plans(self):
         print(self.__plans)
     
-    def get_like_belief(self, belf, n_args=0):
-        if type(belf) == Belief:
-            belf_key = belf.key
-            n_args = len(belf.args)
-        elif type(belf) == str:
-            belf_key = belf
-        else:
-            print(f"{self.my_name}> data type {type(belf)} not accepted")
-            return
-        try:
-            for belief in self.__beliefs[belf_key]:
-                if len(belief.args) == n_args:
-                    return belief
-        except KeyError:
-            return None
+    # def get_like_belief(self, belf, n_args=0):
+    #     if type(belf) == Belief:
+    #         belf_key = belf.key
+    #         n_args = len(belf._args)
+    #     elif type(belf) == str:
+    #         belf_key = belf
+    #     else:
+    #         print(f"{self.my_name}> data type {type(belf)} not accepted")
+    #         return
+    #     try:
+    #         for belief in self.__beliefs[belf_key]:
+    #             if len(belief.args) == n_args:
+    #                 return belief
+    #     except KeyError:
+    #         return None
 
     # TODO: Return How close it is to an existing belief
     def has_belief(self, belief: Belief):
@@ -272,9 +354,6 @@ class Agent:
         except KeyError:
             print(f"{self.my_name}> Plan(key='{plan.key}', args={plan.args}, source={plan.source}) doesn't exist")
             raise RunPlanError
-        # except TypeError:
-        #     print(f"{self.my_name}> Invalid Arguments in Plan(key='{plan.key}', args={plan.args}, source={plan.source})")
-        #     raise RunPlanError
 
     # TODO: implement stoping plan
     def _stop_plan(self, plan):
@@ -376,17 +455,7 @@ class Agent:
             case None:
                 return dict()
             case Belief():
-                key, args, source = astuple(beliefs)
-                if source is None:
-                    if not args or args[0] is None:
-                        belief = Belief(key)
-                    else:
-                        belief = Belief(key,args)
-                elif not args or args[0] is None:
-                    belief = Belief(key,source=source)
-                else:
-                    belief = Belief(key,args,source)
-                return {belief.source: {belief.key: {belief}}}
+                return {beliefs.source: {beliefs.key: {beliefs}}}
             case Iterable():
                 belief_dict = dict()
                 for belief in beliefs:
@@ -410,29 +479,28 @@ class Agent:
 
     def _clean_objectives(
         self, objectives: Optional[Iterable[Objective] | Objective]
-    ) -> List[Objective]:
+    ) -> Set[Objective]:
         match objectives:
             case None:
-                return []
+                return dict()
             case Objective():
-                # key, args, source = astuple(objectives)
-                # if source is None:
-                #     if not args or args is None:
-                #         objective = Objective(key)
-                #     else:
-                #         objective = Objective(key,args)
-                # elif not args or args is None:
-                #     objective = Objective(key,source=source)
-                # else:
-                #     objective = Objective(key,args,source)
-                return [objectives]
+                return {objectives.source: {objectives.key: {objectives}}}
             case Iterable():
+                objective_dict = dict()
                 for objective in objectives:
                     if not isinstance(objective, Objective):
-                        raise InvalidObjectiveError(
-                            f"Expected objectives to have type Iterable[Objectives] | Objectives, recieved {type(objective).__name__}"
+                        raise InvalidBeliefError(
+                            f"Expected objectives to have type Iterable[Objectives] | Objectives, recieved  Iterable[{type(objective).__name__}]"
                         )
-                return list(objectives)
+                    if objective.source in objective_dict:
+                        if objective.key in objective_dict[objective.source]:
+                            objective_dict[objective.source][objective.key].add(objective)
+                        else:
+                            objective_dict[objective.source].update({objective.key: {objective}})
+                    else:
+                        objective_dict.update({objective.source: {objective.key: {objective}}})
+
+                return objective_dict
             case _:
                 raise InvalidObjectiveError(
                     f"Expected beliefs to have type Iterable[Objectives] | Objectives, recieved {type(objectives).__name__}"

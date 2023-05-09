@@ -32,8 +32,9 @@ class Robot(Agent):
 
         self.add_focus_env(initial_env,"Room")
         self.add_objective(Objective("decide_move"))
-        self.add_belief(Belief("room_is_dirty"))
+        self.simple_add("b",("room_is_dirty"))
         self.position = (0,0)
+        self.print_beliefs
         print(f"{self.my_name}> Inicial position {self.position}")
 
     
@@ -42,9 +43,9 @@ class Robot(Agent):
         target = None
 
         dirt_pos = self.search_beliefs("dirt",1,"Room")
-        
+        print(f"{type(dirt_pos.args)}:{dirt_pos.args}")
         x, y = self.position
-        for pos, clean in dirt_pos.args[0].items():
+        for pos, clean in dirt_pos.args.items():
             if not clean:
                 dist = abs(pos[0]-x) + abs(pos[1]-y)
                 if dist < min_dist:
@@ -96,7 +97,7 @@ def main():
     rbt = Robot('R1', initial_env=env, full_log=False)
     Control().start_agents(rbt)
     env.add_dirt((3,1))
-    #rbt.add_objective(Objective("decide_move"))
+    rbt.add_objective(Objective("decide_move"))
 
 if __name__ == "__main__":
     main()
