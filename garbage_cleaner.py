@@ -1,5 +1,7 @@
+from collections.abc import Iterable
+from typing import Optional
 from maspy.environment import Environment 
-from maspy.agent import Agent, Belief, Objective
+from maspy.agent import Agent, Belief, Objective, Plan
 from maspy.system_control import Control
 
 class Room(Environment):
@@ -92,14 +94,44 @@ class Robot(Agent):
         else:
             self.add_objective(Objective("move",[target]))
 
+class testAgent(Agent):
+    def __init__(self, name = 'test'):
+        super().__init__(name)
+        
+    
+    def testing(self,src):
+        print("testing")
+
 def main():
-    env = Room("Room")
-    rbt = Robot('R1', initial_env=env, full_log=False)
-    Control().start_agents(rbt)
-    env.add_dirt((3,1))
-    rbt.add_objective(Objective("decide_move"))
+    ag = testAgent()
+    ag.add_plan(Plan("testPlan",[Belief("a"),Objective("B")]))
+    ag.simple_add("b","a")
+    ag.simple_add("o","B")
+    ag.cycle()
+    
+    # env = Room("Room")
+    # rbt = Robot('R1', initial_env=env, full_log=False)
+    # Control().start_agents(rbt)
+    # env.add_dirt((3,1))
+    # rbt.add_objective(Objective("decide_move"))
 
 if __name__ == "__main__":
     main()
-    
-    
+
+# Diagrama de classes
+# Explicar Caracteristicas de agentes, ambiente, comunicação e controle do sistema
+
+# Criação de N agentes
+#   -> Crenças (Chave : Palavra, Argumentos: Qualquer Estrutura, Fonte: Palavra)
+#   -> Objetivos (Chave : Palavra, Argumentos: Qualquer Estrutura, Fonte: Palavra)
+#   -> Planos 
+#   -> Percepção de N ambientes focados
+#   -> Comunicação com N canais
+
+# Criação de N ambientes
+#   -> Fatos
+#   -> Ações do ambiente
+
+# Criação de N canais de comunicação
+#   -> Descrição de canais 
+#   -> lista de agentes conectados

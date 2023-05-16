@@ -3,10 +3,6 @@ import maspy.environment as envrmt
 from maspy.system_control import Control
 from maspy.agent import Agent, Belief, Ask, Objective
 import importlib as imp
-from examples.crossing_negotiation.driver import driver
-from examples.crossing_negotiation.crossroads import crossroads
-from examples.garbage_cleaner.robot import Robot
-from examples.garbage_cleaner.room import Room
 from time import sleep
 
 def test_beliefs():

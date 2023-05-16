@@ -108,7 +108,7 @@ class Control(metaclass=ControlMeta):
                 return
             self.__started_agents.append(agent_name)
             agent = self.__agents[agent_name]
-            agent.reasoning()
+            agent.cycle()
         except KeyError:
             print(
                 f"{self.__my_name}> 'maspy.agent.Agent' {agent_name} not connected to environment"

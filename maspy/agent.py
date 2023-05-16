@@ -82,100 +82,33 @@ class Belief:
 
         return hash((self.key, args_hashable, self.source))
 
-
+@dataclass
+class Objective:
+    key: str
+    args: list = field(default_factory=list)
+    source: str = "percept"
+    
+@dataclass
+class Plan:
+    key: str
+    context: list = field(default_factory=list)
+    body: Callable = None
+        
 @dataclass
 class Ask:
     belief: Belief
     reply: list = field(default_factory=list)
     source: str = "unknown"
 
-
-@dataclass
-class Objective:
-    key: str
-    _args: tuple = field(default_factory=tuple)
-    source: str = "percept"
-
-    @property
-    def args(self):
-        if len(self._args) > 1:
-            return self._args
-        elif len(self._args) == 1:
-            return self._args[0]
-        else:
-            return tuple()
-
-    def __post_init__(self):
-        match self._args:
-            case list() | dict() | str():
-                object.__setattr__(self, "_args", tuple([self._args]))
-            case tuple():
-                pass
-            case Iterable():
-                object.__setattr__(self, "_args", tuple(self._args))
-            case _:
-                object.__setattr__(self, "_args", tuple([self._args]))
-
-    def weak_eq(self, other: "Objective"):
-        return (
-            self.key == other.key
-            and len(self._args) == len(other._args)
-            and self.source == other.source
-        )
-
-    def update(self, key: str = None, args=None, source=None) -> "Objective":
-        if key is not None:
-            new_name = key
-        else:
-            new_name = self.key
-
-        if args is not None:
-            new_args = args
-        else:
-            new_args = self._args
-
-        if source is not None:
-            new_source = source
-        else:
-            new_source = self.source
-
-        return Objective(new_name, new_args, new_source)
-
-    # implementing hash for Belief is fine, it is impossible to change something inside
-    # without creating a new object therefore, Belief can be used in dict and sets
-    def __hash__(self) -> int:
-        args_hashable = []
-        unhashable_types = {}
-        for arg in self._args:
-            arg_dict = type(arg).__dict__
-            if arg_dict.get("__hash__"):
-                print("A")
-                args_hashable.append(arg)
-            elif isinstance(arg, (List, Dict, Set)):
-                print("B")
-                args_hashable.append(repr(arg))
-            else:
-                raise TypeError(f"Unhashable type: {type(arg)}")
-        args_hashable = tuple(args_hashable)
-
-        return hash((self.key, args_hashable, self.source))
-
-
-
 MSG = Belief | Ask | Objective
-
 
 class Agent:
     def __init__(
         self,
         name: str,
-        beliefs: Optional[Iterable[Belief] | Belief],
-        objectives: Optional[Iterable[Objective] | Objective],
-        plans: Optional[
-            Dict[str, Callable[..., Any]]
-            | Iterable[Tuple[str, Callable[..., Any]]]
-            | Tuple[str, Callable[..., Any]]
-        ],
+        beliefs: Optional[Iterable[Belief] | Belief] = None,
+        objectives: Optional[Iterable[Objective] | Objective] = None,
+        plans: Optional[Iterable[Plan] | Plan] = None,
         full_log = False
     ):
         self.full_log = full_log
@@ -187,7 +120,6 @@ class Agent:
         self.__beliefs = self._clean_beliefs(beliefs)
         self.__objectives = self._clean_objectives(objectives)
         self.__plans = self._clean_plans(plans)
-        self.__plans.update({"reasoning": self.reasoning})
 
         self.__default_channel = None
         self.paused_agent = False
@@ -223,13 +155,15 @@ class Agent:
     def get_env(self, env_name: str):
         return self.__environments[env_name]
 
-    def simple_add(self, type: Belief | Objective | str, key: str, args: Any = tuple(), source: str = "percept"):
+    def add(self, type: Belief | Objective | Plan | str, key: str, args: Any = tuple(), source: str = "percept"):
         type = type.lower()
         match type:
             case Belief() | "belief" | "bel" | "b":
                 self.add_belief(Belief(key,args,source))
             case Objective() | "objective" | "obj" | "o":
-                self.add_objective(Objective(key,args,source))
+                self.add_objective(Objective(key,source))
+            #case Plan() | "plan" | 'p':
+            #    self.add_plan(Plan())
             
     def add_belief(self, belief: Iterable[Belief] | Belief):
         beliefs = self._clean_beliefs(belief)
@@ -264,29 +198,22 @@ class Agent:
     def add_objective(self, objective: Iterable[Objective] | Objective):
         objectives = self._clean_objectives(objective)
         print(f"{self.my_name}> Adding {objectives}") if self.full_log else ...
-        for key, value in objectives.items():
-            if key in self.__objectives and isinstance(value, dict):
-                for inner_key, inner_value in value.items():
-                    if inner_key in self.__objectives[key] and isinstance(inner_value, set):
-                        self.__objectives[key][inner_key].add(inner_value)
-                    else:
-                        self.__objectives[key][inner_key] = value 
-            else:
-                self.__objectives[key] = value
+        if objectives not in self.__objectives:
+            self.__objectives.append(objective)
 
             if self.paused_agent:
                 self.paused_agent = False
-                self.__plans["reasoning"]()
+                self.cycle()
 
     def rm_objective(self, objective: Objective):
         self.__objectives.remove(objective)
 
-    def add_plan(self, plan: Tuple[str, Callable] | Dict[str, Callable]):
-        new_plans = self._clean_plans(plan)
-        self.__plans.update(new_plans)
+    def add_plan(self, plan: List[Plan] | Plan):
+        plans = self._clean_plans(plan)
+        self.__plans.append(plans)
 
-    def rm_plan(self, plan):
-        del self.__plans[plan.key]
+    def rm_plan(self, plan: Plan):
+        self.__plans.pop(plan)
 
     @property
     def print_beliefs(self):
@@ -316,10 +243,13 @@ class Agent:
     #     except KeyError:
     #         return None
 
+    def has_objective(self, objective: Objective):
+        return objective in self.__objectives
+
     # TODO: Return How close it is to an existing belief
     def has_belief(self, belief: Belief):
         return belief in self.__beliefs.get(Belief.source, {}).get(belief.key, {})
-        
+    
     def search_beliefs(
         self,
         name: str,
@@ -344,22 +274,18 @@ class Agent:
         else:
             return None
 
-    def _run_plan(self, plan):
+    def _run_plan(self, plan: Plan, objective: Objective):
         sleep(0.2)
-        print(
-            f"{self.my_name}> Running Plan(key='{plan.key}', args={plan.args}, source={plan.source})"
-        )  if self.full_log else ...
+        print(f"{self.my_name}> Running {plan}")  if self.full_log else ...
         try:
-            return self.__plans[plan.key](self, plan.source, *plan.args)
+            return plan.body(self, objective.source, *objective.args)
         except KeyError:
-            print(f"{self.my_name}> Plan(key='{plan.key}', args={plan.args}, source={plan.source}) doesn't exist")
+            print(f"{self.my_name}> {plan} doesn't exist")
             raise RunPlanError
 
     # TODO: implement stoping plan
     def _stop_plan(self, plan):
-        print(
-            f"{self.my_name}> Stoping plan(key='{plan.key}', args={plan.args}, source={plan.source})"
-        )  if self.full_log else ...
+        print(f"{self.my_name}> Stoping {plan})")  if self.full_log else ...
         pass
 
     def recieve_msg(self, sender, act, msg: MSG):
@@ -400,7 +326,7 @@ class Agent:
                 pass
 
             case _:
-                TypeError(f"Unknown type of message {act} | {msg}")
+                TypeError(f"Unknown type of message {act}:{msg}")
 
     def prepare_msg(self, target: str, act: str, msg: MSG, channel: str = None):
         channel = self.__default_channel
@@ -415,13 +341,11 @@ class Agent:
     def send_msg(self, target: str, act: str, msg: MSG, channel: str):
         pass
 
-    def reasoning(self):
+    def cycle(self):
         while self.__objectives:
             self.perception()
-            # Adicionar guard para os planos
-            #  -funcao com condicoes para o plano rodar
-            #  -um plano eh (guard(),plano())
-            self.execution()
+            chosen_plan, source = self.reasoning()
+            self.execution(chosen_plan, source)
             sleep(1)
         self.paused_agent = True
 
@@ -434,23 +358,41 @@ class Agent:
             for key, value in perceived.items():
                 self.add_belief(Belief(key,value,env_name))
     
-    def execution(self):
-        if not self.__objectives:
+    def reasoning(self):
+        for plan in self.__plans:
+            valid_plan = True
+            objective_plan = None
+            for context in plan.context:
+                match context:
+                    case Belief(): 
+                        if not self.has_belief(context):
+                            valid_plan = False
+                            break
+                    case Objective():
+                        if not self.has_objective(context):
+                            valid_plan = False
+                            break
+                    case _: 
+                        print(f"{self.my_name}> Context {type(context)}{context} from Plan[{plan.key}] isn't Belief nor Objective")
+                        valid_plan = False
+                        break
+            if valid_plan:
+                return plan, plan_source
+        return None
+    
+    def execution(self, chosen_plan, source):
+        if chosen_plan is None:
             return None
-        objective = self.__objectives[-1]
-        print(f"{self.my_name}> Execution of {objective}") if self.full_log else ...
+        print(f"{self.my_name}> Execution of {chosen_plan}") if self.full_log else ...
         try:
-            result = self._run_plan(objective)
-            if objective in self.__objectives:
-                self.rm_objective(objective)
-
+            result = self._run_plan(chosen_plan, source)
         except RunPlanError:
-            print(f"{self.my_name}> {objective} failed")
+            print(f"{self.my_name}> {chosen_plan} failed")
 
     # TODO: should invalid arguments be an error or a warning?
     def _clean_beliefs(
         self, beliefs: Optional[Iterable[Belief] | Belief]
-    ) -> Set[Belief]:
+    ) -> Dict:
         match beliefs:
             case None:
                 return dict()
@@ -479,28 +421,21 @@ class Agent:
 
     def _clean_objectives(
         self, objectives: Optional[Iterable[Objective] | Objective]
-    ) -> Set[Objective]:
+    ) -> List[Objective]:
         match objectives:
             case None:
-                return dict()
+                return []
             case Objective():
-                return {objectives.source: {objectives.key: {objectives}}}
+                return [objectives]
             case Iterable():
-                objective_dict = dict()
+                objtv_list = []
                 for objective in objectives:
                     if not isinstance(objective, Objective):
-                        raise InvalidBeliefError(
-                            f"Expected objectives to have type Iterable[Objectives] | Objectives, recieved  Iterable[{type(objective).__name__}]"
+                        raise InvalidObjectiveError(
+                            f"Expected objectives to have type Iterable[Objectives] | Objectives, recieved {type(objective).__name__}"
                         )
-                    if objective.source in objective_dict:
-                        if objective.key in objective_dict[objective.source]:
-                            objective_dict[objective.source][objective.key].add(objective)
-                        else:
-                            objective_dict[objective.source].update({objective.key: {objective}})
-                    else:
-                        objective_dict.update({objective.source: {objective.key: {objective}}})
-
-                return objective_dict
+                    objtv_list.append(objective)
+                return objtv_list
             case _:
                 raise InvalidObjectiveError(
                     f"Expected beliefs to have type Iterable[Objectives] | Objectives, recieved {type(objectives).__name__}"
@@ -508,51 +443,21 @@ class Agent:
 
     def _clean_plans(
         self,
-        plans: Optional[
-            Dict[str, Callable[..., Any]]
-            | Tuple[str, Callable[..., Any]]
-            | Iterable[Tuple[str, Callable[..., Any]]]
-        ],
-    ) -> Dict[str, Callable[..., Any]]:
+        plans: Optional[Iterable[Plan] | Plan ],
+    ) -> List[Plan]:
         match plans:
             case None:
-                return {}
-            case tuple() if len(plans) == 2 and isinstance(plans[0], str) and callable(
-                plans[1]
-            ):
-                return {plans[0]: plans[1]}
-            case tuple():
-                type_list = tuple(map(lambda x: type(x).__name__, plans))
-                types = ", ".join(type_list)
-                raise InvalidPlanError(
-                    f"Expected plans to have type Tuple[str, Callable], recieved Tuple[{types}]"
-                )
-
-            case dict():
-                for key, plan in plans.items():
-                    if not (isinstance(key, str) or callable(plan)):
-                        raise InvalidPlanError(
-                            f"Expected plans to have type Dict[str, Callable], recieved Dict[{type(key).__name__}, {type(plan).__name__}]"
-                        )
+                return []
+            case Plan():
                 return plans
-
             case Iterable():
-                try:
-                    for key, plan in plans:  # type: ignore
-                        if not (isinstance(key, str) or callable(plan)):
-                            raise InvalidPlanError(
-                                f"Expected plans to have type Iterable[Tuple[str, Callable]], recieved Iterable[Tuple[{type(key).__name__}, {type(plan).__name__}"
-                            )
-                    return dict(plans)
-                except TypeError:
-                    type_set = set(map(lambda x: type(x).__name__, plans))
-                    types = " | ".join(type_set)
-                    raise InvalidPlanError(
-                        f"Expected plans to have type Iterable[Tuple[str, Callable]], recieved Iterable[{types}]"
-                    )
+                for plan in plans:
+                    if not isinstance(plan, Plan):
+                        raise InvalidPlanError(
+                            f"Expected plans to have type Iterable[Tuple[str, Callable]], recieved Iterable[{types}]"
+                        )
             case _:
                 raise InvalidPlanError(
                     f"Expected plans to have type Dict[str, Callable] | Iterable[Tuple[str, Callable]] | Tuple(str, Callable), recieved {type(plans).__name__}"
                 )
-        return {}
 
