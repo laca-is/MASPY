@@ -1,9 +1,11 @@
 import maspy.communication as cmnct
 import maspy.environment as envrmt
-from maspy.system_control import Control
+from maspy.coordinator import Control
 from maspy.agent import Agent, Belief, Ask, Objective
 import importlib as imp
+import inspect
 from time import sleep
+from dataclasses import astuple
 
 def test_beliefs():
     bel_str = Belief("foo", "abc")
@@ -130,5 +132,17 @@ def main():
     print("END")
 
 
+def test(A,B,G):
+    print("A")
+
 if __name__ == "__main__":
-    cleaner_robot()
+    args = inspect.signature(test).parameters
+    print(f"{args} | {len(args)}")
+    ag = Agent("test",full_log=True)
+    ag.add(Belief,"a",[1,2,3],"other")
+    ag.add("o","ob",(2,3))
+    ag.add(Belief("a",([2,3],2)))
+    ag.add("b","c",(1,2,3))
+    ag.rm("obj","ob",(2,3))
+    print( ag.search("o","ob") )
+    #cleaner_robot()

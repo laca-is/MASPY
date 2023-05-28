@@ -2,7 +2,7 @@ from collections.abc import Iterable
 from typing import Optional
 from maspy.environment import Environment 
 from maspy.agent import Agent, Belief, Objective, Plan
-from maspy.system_control import Control
+from maspy.coordinator import Control
 
 class Room(Environment):
     def __init__(self, env_name='room'):
@@ -26,15 +26,15 @@ class Room(Environment):
 class Robot(Agent):
     def __init__(self, name: str, beliefs = [], objectives = [], plans= {}, initial_env= None, full_log=False):
         super().__init__(name, beliefs, objectives, plans, full_log)
-        self.add_plan({
-            "decide_move": Robot.decide_move,
-            "clean": Robot.clean,
-            "move": Robot.move
-        })
+        self.add_plan([
+            Plan("decide_move",[],Robot.decide_move),
+            Plan("clean",[],Robot.clean),
+            Plan("move",[],Robot.move)
+        ])
 
         self.add_focus_env(initial_env,"Room")
-        self.add_objective(Objective("decide_move"))
-        self.simple_add("b",("room_is_dirty"))
+        self.add("o","decide_move")
+        self.add("b","room_is_dirty")
         self.position = (0,0)
         self.print_beliefs
         print(f"{self.my_name}> Inicial position {self.position}")
@@ -44,7 +44,7 @@ class Robot(Agent):
         min_dist = float("inf")
         target = None
 
-        dirt_pos = self.search_beliefs("dirt",1,"Room")
+        dirt_pos = self.search("b","dirt",1,"Room")
         print(f"{type(dirt_pos.args)}:{dirt_pos.args}")
         x, y = self.position
         for pos, clean in dirt_pos.args.items():
@@ -61,16 +61,15 @@ class Robot(Agent):
             print("*** Finished Cleaning ***")
         else:
             print(f"{self.my_name}> Moving to {target}")
-            self.add_objective(Objective("move",[target]))
+            self.add(Objective("move",[target]))
                                  
     def clean(self,src):
         if self.has_belief(Belief("room_is_dirty")):
             self.get_env("Room").clean_position(self.my_name, self.position)
-            self.add_objective(Objective("decide_move"))
+            self.add(Objective("decide_move"))
     
     def move(self,src,target):
         x, y = self.position
-        
         if x != target[0]:
             diff = target[0] - x
             direction = (int(diff/abs(diff)),0)
@@ -89,31 +88,25 @@ class Robot(Agent):
         
         if self.position == target:
             print(f"{self.my_name}> Reached dirt position")
-            self.add_objective(Objective("clean"))
+            self.add(Objective("clean"))
             return
         else:
-            self.add_objective(Objective("move",[target]))
+            self.add(Objective("move",[target]))
 
 class testAgent(Agent):
     def __init__(self, name = 'test'):
-        super().__init__(name)
+        super().__init__(name,full_log=True)
+        self.add_plan(Plan("testing",[],self.testing))
         
-    
-    def testing(self,src):
-        print("testing")
+    def testing(self,src,A):
+        print(f"testing {A}")
 
-def main():
-    ag = testAgent()
-    ag.add_plan(Plan("testPlan",[Belief("a"),Objective("B")]))
-    ag.simple_add("b","a")
-    ag.simple_add("o","B")
-    ag.cycle()
-    
-    # env = Room("Room")
-    # rbt = Robot('R1', initial_env=env, full_log=False)
-    # Control().start_agents(rbt)
-    # env.add_dirt((3,1))
-    # rbt.add_objective(Objective("decide_move"))
+def main(): 
+    env = Room("Room")
+    rbt = Robot('R1', initial_env=env, full_log=False)
+    rbt.reasoning_cycle()
+    env.add_dirt((3,1))
+    rbt.add(Objective("decide_move"))
 
 if __name__ == "__main__":
     main()
