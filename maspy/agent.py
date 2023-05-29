@@ -190,7 +190,7 @@ class Agent:
         self.__environments: Dict[str, Any] = {}
 
         self.__beliefs = self._clean(beliefs)
-        self.__new_beliefs = self._clean(None)
+        self.__new_beliefs = self._clean(None) #TODO - Better method for belief plan trigger
         self.__objectives = self._clean(objectives)
         self.__plans = self._clean_plans(plans)
 
@@ -263,7 +263,6 @@ class Agent:
 
     def has_belief(self, belief: Belief):
         return belief in self.__beliefs.get(belief.source, {}).get(belief.key, {})
-    
     
     def add(
         self, 
