@@ -1,4 +1,4 @@
-# MASPY_BDI
+# MASPY_BDI - Multi-Agent System for Python
 
 Doing:
   - Concrete version of a reasoning cycle.
