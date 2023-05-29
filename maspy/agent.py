@@ -116,14 +116,14 @@ class Objective:
             case _:
                 object.__setattr__(self, "_args", tuple([self._args]))
 
-    def weak_eq(self, other: "Belief"):
+    def weak_eq(self, other: "Objective"):
         return (
             self.key == other.key
             and len(self._args) == len(other._args)
             and self.source == other.source
         )
 
-    def update(self, key: str = None, args=None, source=None) -> "Belief":
+    def update(self, key: str = None, args=None, source=None) -> "Objective":
         if key is not None:
             new_name = key
         else:
@@ -139,7 +139,7 @@ class Objective:
         else:
             new_source = self.source
 
-        return Belief(new_name, new_args, new_source)
+        return Objective(new_name, new_args, new_source)
 
     # implementing hash for Belief is fine, it is impossible to change something inside
     # without creating a new object therefore, Belief can be used in dict and sets
@@ -227,7 +227,44 @@ class Agent:
 
     def get_env(self, env_name: str):
         return self.__environments[env_name]
+    
+    def add_plan(self, plan: List[Plan] | Plan):
+        plans = self._clean_plans(plan)
+        self.__plans += plans
 
+    def rm_plan(self, plan: Plan):
+        self.__plans.pop(plan)
+
+    @property
+    def print_beliefs(self):
+        print("Beliefs:",self.__beliefs)
+
+    @property
+    def print_objectives(self):
+        print("Objectives:",self.__objectives)
+    
+    @property
+    def print_plans(self):
+        print("Plans:",self.__plans)
+
+    def has_close(
+        self, 
+        data_type: Belief | Objective | str,
+        key: str, 
+        args: int | Any = None, 
+        source: str = None
+    ):
+        if self.search(data_type, key, args, source) is not None:
+            return True
+        return False 
+
+    def has_objective(self, objective: Objective):
+        return objective in self.__objectives.get(objective.source, {}).get(objective.key, {})
+
+    def has_belief(self, belief: Belief):
+        return belief in self.__beliefs.get(belief.source, {}).get(belief.key, {})
+    
+    
     def add(
         self, 
         data_type: Belief | Objective | str, 
@@ -289,43 +326,7 @@ class Agent:
                         type_base[data_type.source][data_type.key].remove(data_type)
         except KeyError:
             print(f"{self.my_name}> {data_type} doesn't exist | purge({purge_source})")
-    
-    def add_plan(self, plan: List[Plan] | Plan):
-        plans = self._clean_plans(plan)
-        self.__plans += plans
-
-    def rm_plan(self, plan: Plan):
-        self.__plans.pop(plan)
-
-    @property
-    def print_beliefs(self):
-        print("Beliefs:",self.__beliefs)
-
-    @property
-    def print_objectives(self):
-        print("Objectives:",self.__objectives)
-    
-    @property
-    def print_plans(self):
-        print("Plans:",self.__plans)
-
-    def has_close(
-        self, 
-        data_type: Belief | Objective | str,
-        key: str, 
-        args: int | Any = None, 
-        source: str = None
-    ):
-        if self.search(data_type, key, args, source) is not None:
-            return True
-        return False 
-
-    def has_objective(self, objective: Objective):
-        return objective in self.__objectives.get(objective.source, {}).get(objective.key, {})
-
-    def has_belief(self, belief: Belief):
-        return belief in self.__beliefs.get(belief.source, {}).get(belief.key, {})
-    
+      
     def search(
         self, data_type: Belief | Objective | str, 
         key: str = None, args: int | Any = None, 
@@ -336,43 +337,7 @@ class Agent:
             return self._central("search-all",data_type,key,args,source)
         else:    
             return self._central("search",data_type,key,args,source)
-    
-    def _central(self,def_type,data_type,key,args,source):
-        if type(data_type) is str:
-            data_type = data_type.lower()
-        elif type(data_type) is type:
-            data_type = data_type.__name__.lower()
-        elif type(data_type) is Belief or type(data_type) is Objective:
-            key,args,source = (data_type.key,data_type.args,data_type.source)
-            data_type = type(data_type)
-        else:
-            print(f"{self.my_name}> Error in Central Typing for {type(data_type)}:{data_type}")
-            return None
-        
-        if data_type in self._type_belief_set:
-            type_base = self.__beliefs
-            data_type = Belief(key,args,source)
-            
-        elif data_type in self._type_objective_set:
-            type_base = self.__objectives
-            data_type = Objective(key,args,source)
-
-        elif type(data_type) not in {Belief,Objective}:
-            print("Error")
-            return None
-        
-        match def_type:
-            case "add":
-                return self._adding(type_base,data_type)
-            case "rm":
-                return self._removing(type_base,data_type)
-            case "rm-source":
-                return self._removing(type_base,data_type,True)
-            case "search":
-                return self._searching(type_base,key,args,source)
-            case "search-all":
-                return self._searching(type_base,key,args,source,True)
-                           
+                             
     def _searching(
         self,type_base: list,
         key: str, args: int | Any,
@@ -428,6 +393,42 @@ class Agent:
             
         return found_data
 
+    def _central(self,def_type,data_type,key,args,source):
+        if type(data_type) is str:
+            data_type = data_type.lower()
+        elif type(data_type) is type:
+            data_type = data_type.__name__.lower()
+        elif type(data_type) is Belief or type(data_type) is Objective:
+            key,args,source = (data_type.key,data_type.args,data_type.source)
+            data_type = type(data_type)
+        else:
+            print(f"{self.my_name}> Error in Central Typing for {type(data_type)}:{data_type}")
+            return None
+        
+        if data_type in self._type_belief_set:
+            type_base = self.__beliefs
+            data_type = Belief(key,args,source)
+            
+        elif data_type in self._type_objective_set:
+            type_base = self.__objectives
+            data_type = Objective(key,args,source)
+
+        elif type(data_type) not in {Belief,Objective}:
+            print("Error")
+            return None
+        
+        match def_type:
+            case "add":
+                return self._adding(type_base,data_type)
+            case "rm":
+                return self._removing(type_base,data_type)
+            case "rm-source":
+                return self._removing(type_base,data_type,True)
+            case "search":
+                return self._searching(type_base,key,args,source)
+            case "search-all":
+                return self._searching(type_base,key,args,source,True)
+
     def _run_plan(self, plan: Plan, trigger: Belief | Objective):
         sleep(0.2)
         print(f"{self.my_name}> Running {plan}")  if self.full_log else ...
@@ -463,12 +464,12 @@ class Agent:
 
             case ("askOne", ask) if isinstance(ask, Ask):
                 found_belief = self.search(ask.belief)
-                self.prepare_msg(ask.source, "tell", found_belief)
+                self.send(ask.source, "tell", found_belief)
 
             case ("askAll", ask) if isinstance(ask, Ask):
                 found_beliefs = self.search(ask.belief, all=True)
                 for bel in found_beliefs:
-                    self.prepare_msg(ask.source, "tell", bel)
+                    self.send(ask.source, "tell", bel)
 
             case ("tellHow", belief):
                 pass
@@ -482,7 +483,7 @@ class Agent:
             case _:
                 TypeError(f"Unknown type of message {act}:{msg}")
 
-    def prepare_msg(self, target: str, act: str, msg: MSG, channel: str = None):
+    def send(self, target: str, act: str, msg: MSG, channel: str = None):
         channel = self.__default_channel
         msg = msg.update(source = self.my_name)
         match (act, msg):
@@ -546,6 +547,7 @@ class Agent:
         except RunPlanError:
             print(f"{self.my_name}> {chosen_plan} failed")
 
+    # TODO: should invalid arguments be an error or a warning?
     def _clean(
         self, data_type: Iterable[Belief | Objective] | Belief | Objective 
     ) -> Dict:
@@ -574,58 +576,6 @@ class Agent:
                 raise InvalidBeliefError(
                     f"Expected data type to have be Iterable[Belief | Objective] | Belief | Objective, recieved {type(data_type).__name__}"
                 )    
-    
-    # TODO: should invalid arguments be an error or a warning?
-    def _clean_beliefs(
-        self, beliefs: Optional[Iterable[Belief] | Belief]
-    ) -> Dict:
-        match beliefs:
-            case None:
-                return dict()
-            case Belief():
-                return {beliefs.source: {beliefs.key: {beliefs}}}
-            case Iterable():
-                belief_dict = dict()
-                for belief in beliefs:
-                    if not isinstance(belief, Belief):
-                        raise InvalidBeliefError(
-                            f"Expected beliefs to have type Iterable[Belief] | Belief, recieved Iterable[{type(belief).__name__}]"
-                        )
-                    if belief.source in belief_dict:
-                        if belief.key in belief_dict[belief.source]:
-                            belief_dict[belief.source][belief.key].add(belief)
-                        else:
-                            belief_dict[belief.source].update({belief.key: {belief}})
-                    else:
-                        belief_dict.update({belief.source: {belief.key: {belief}}})
-
-                return belief_dict
-            case _:
-                raise InvalidBeliefError(
-                    f"Expected beliefs to have type Iterable[Belief] | Belief, recieved {type(beliefs).__name__}"
-                )    
-
-    def _clean_objectives(
-        self, objectives: Optional[Iterable[Objective] | Objective]
-    ) -> List[Objective]:
-        match objectives:
-            case None:
-                return []
-            case Objective():
-                return [objectives]
-            case Iterable():
-                objtv_list = []
-                for objective in objectives:
-                    if not isinstance(objective, Objective):
-                        raise InvalidObjectiveError(
-                            f"Expected objectives to have type Iterable[Objectives] | Objectives, recieved {type(objective).__name__}"
-                        )
-                    objtv_list.append(objective)
-                return objtv_list
-            case _:
-                raise InvalidObjectiveError(
-                    f"Expected beliefs to have type Iterable[Objectives] | Objectives, recieved {type(objectives).__name__}"
-                )
 
     def _clean_plans(
         self,
