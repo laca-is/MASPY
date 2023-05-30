@@ -12,7 +12,6 @@ import maspy.agent
         -Initialization
 """
 
-
 class ControlMeta(type):
     _instances: Dict[str, Any] = {}
     _lock: Lock = Lock()
