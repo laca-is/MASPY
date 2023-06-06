@@ -37,14 +37,18 @@ class Environment(metaclass=EnvironmentMultiton):
             self._add_agent(agents)
     
     def _add_agent(self, agent):
-        if agent.my_name not in self._agents:
-            
-            self.agent_list[type(agent).__name__] = agent.my_name
-            self._agents[agent.my_name] = agent
-            
-            self.print(f'Connecting agent {type(agent).__name__}:{agent.my_name} to Environment')
+        if type(agent).__name__ in self.agent_list:
+            if agent.my_name[0] in self.agent_list[type(agent).__name__]:
+                self.agent_list[type(agent).__name__][agent.my_name[0]].update({agent.my_name})
+                self._agents[agent.my_name] = agent
+            else:
+                self.agent_list[type(agent).__name__].update({agent.my_name[0] : {agent.my_name}})
+                self._agents[agent.my_name] = agent
         else:
-            self.print(f'Agent {type(agent).__name__}:{agent.my_name} already connected')
+            self.agent_list[type(agent).__name__] = {agent.my_name[0] : {agent.my_name}}
+            self._agents[agent.my_name] = agent
+        
+        self.print(f'> Connecting agent {type(agent).__name__}:{agent.my_name} to channel')
     
     def _add_role(self, role_name: str):
         if type(role_name) == str:

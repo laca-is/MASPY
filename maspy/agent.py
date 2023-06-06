@@ -558,9 +558,10 @@ class Agent:
             if list_type in self._type_env_set:
                 return self._environments[class_name][0].agent_list[agent_name]
             if list_type in self._type_ch_set:
+                #print(self._channels[class_name].agent_list[class_name])
                 return self._channels[class_name].agent_list[agent_name]
-        except KeyError:
-            self.print(f"Not connected to {list_type}:{class_name}")
+        except KeyError as ke:
+            self.print(f"Not connected to {list_type}:{class_name}:{ke}")
             
     def execute(self,env_name):
         try:

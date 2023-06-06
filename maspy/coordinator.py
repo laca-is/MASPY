@@ -104,7 +104,7 @@ class Coordinator(metaclass=CoordinatorMeta):
         except KeyError:
             self.print(f"'maspy.agent.Agent' {agent_name} not connected to environment")
             
-    def stop_all_agents(self,signal,frame):
+    def stop_all_agents(self,sig,frame):
         for agent in self._started_agents:
             agent.stop_cycle()
     

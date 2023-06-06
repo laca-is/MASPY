@@ -48,14 +48,19 @@ class Channel(metaclass=CommsMultiton):
                 type_base[key] = value
     '''
     def _add_agent(self, agent):
-        if agent.my_name not in self._agents:
-            
-            self.agent_list[type(agent).__name__] = agent.my_name
-            self._agents[agent.my_name] = agent
-            
-            self.print(f'> Connecting agent {type(agent).__name__}:{agent.my_name} to channel')
+        if type(agent).__name__ in self.agent_list:
+            if agent.my_name[0] in self.agent_list[type(agent).__name__]:
+                self.agent_list[type(agent).__name__][agent.my_name[0]].update({agent.my_name})
+                self._agents[agent.my_name] = agent
+            else:
+                self.agent_list[type(agent).__name__].update({agent.my_name[0] : {agent.my_name}})
+                self._agents[agent.my_name] = agent
         else:
-            self.print(f'> Agent {type(agent).__name__}:{agent.my_name} already connected')
+            self.agent_list[type(agent).__name__] = {agent.my_name[0] : {agent.my_name}}
+            self._agents[agent.my_name] = agent
+        
+        self.print(f'> Connecting agent {type(agent).__name__}:{agent.my_name} to channel')
+
             
     def _rm_agents(self, agents):
         try:
@@ -78,12 +83,6 @@ class Channel(metaclass=CommsMultiton):
             self._agents[target].recieve_msg(sender,act,msg)
         except KeyError:
             self.print(f"> Agent {target} not connected")
-    
-    def send_agents_list(self):
-        for agent_name in self._agents:
-            self._agents[agent_name].recieve_msg(
-                agent_name, "env_tell", Belief("Agents", [self.agent_list], self._my_name)
-            )
 
     def function_call(self, func):
         @wraps(func)
