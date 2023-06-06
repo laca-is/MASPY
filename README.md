@@ -1,18 +1,20 @@
 # MASPY_BDI - Multi-Agent System for Python
 
 Doing:
-  - Concrete version of a reasoning cycle.
-  - Making plans a dataclass
-  - Making objectives simpler
+  - Making examples
   
 Todo:
   - Implement all types of messages acts
   - Make better error managment
   - Look into a more robust reasoning cycle
-  - Review communication method
+  - Warning System and depuration of Code
   - Introduce threading and parallelism
+  - Introduce Machine Learning in Agent Reasoning
 
 Done:
+  - Connections and Utilizations of Env and Channels Remade
+  - Version 1.0 of the Reasoning Cycle
+  - Beliefs, Objectives and Plans Managment Made Simpler
   - Implemented agent's percepetion can detect environment's facts
   - Agents can "connect" to environment by importing it
   - Environment's facts managment 
