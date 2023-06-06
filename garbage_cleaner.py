@@ -11,33 +11,32 @@ class Room(Environment):
         self.create_fact("dirt",{(0,1): False, (2,2): False})
 
     def add_dirt(self, position):
-        print(f"{self._my_name}> Dirt created in position {position}")
+        self.print(f"Dirt created in position {position}")
         dirt_status = self.get_fact_value("dirt")
         dirt_status.update({position: False}) 
         #self._update_fact("dirt",dirt_status) # same as below
     
     def clean_position(self, agent, position):
-        print(f"{self._my_name}> {agent} is cleaning position {position}")
+        self.print(f"{agent} is cleaning position {position}")
         dirt_status = self.get_fact_value("dirt")
         if dirt_status[position] is False:
             dirt_status[position] = True # changes the dict inside fact
         #self._update_fact("dirt",dirt_status) # useless cause of above
 
 class Robot(Agent):
-    def __init__(self, name: str, beliefs = [], objectives = [], plans= {}, initial_env= None, full_log=False):
-        super().__init__(name, beliefs, objectives, plans, full_log)
+    def __init__(self, name, initial_env=None, full_log=False):
+        super().__init__(name, full_log=full_log)
         self.add_plan([
-            Plan("decide_move",[],Robot.decide_move),
-            Plan("clean",[],Robot.clean),
-            Plan("move",[],Robot.move)
+            ("decide_move",[],Robot.decide_move),
+            ("clean",[],Robot.clean),
+            ("move",[],Robot.move)
         ])
-
-        self.add_focus_env(initial_env,"Room")
+        self.connect(initial_env)
         self.add("o","decide_move")
         self.add("b","room_is_dirty")
         self.position = (0,0)
         self.print_beliefs
-        print(f"{self.my_name}> Inicial position {self.position}")
+        self.print(f"Inicial position {self.position}")
 
     
     def decide_move(self,src):
@@ -61,19 +60,21 @@ class Robot(Agent):
             print("*** Finished Cleaning ***")
         else:
             print(f"{self.my_name}> Moving to {target}")
-            self.add(Objective("move",[target]))
+            self.add("o","move",(target,))
                                  
     def clean(self,src):
         if self.has_belief(Belief("room_is_dirty")):
-            self.get_env("Room").clean_position(self.my_name, self.position)
+            self.execute("Room").clean_position(self.my_name, self.position)
             self.add(Objective("decide_move"))
     
     def move(self,src,target):
         x, y = self.position
+
+        self.print(target," - ",x,y)
         if x != target[0]:
             diff = target[0] - x
             direction = (int(diff/abs(diff)),0)
-        else:
+        elif y != target[1]:
             diff = target[1] - y
             direction = (0,int(diff/abs(diff)))
         
@@ -84,19 +85,20 @@ class Robot(Agent):
             case (1,0): print(f"{self.my_name}> Moving Right")
         
         self.position = (x+direction[0],y+direction[1])
-        print(f"{self.my_name}> New position: {self.position}")
+        self.print(f"New position: {self.position}")
         
+        print(f"{self.position} {target}")
         if self.position == target:
-            print(f"{self.my_name}> Reached dirt position")
+            self.print(f"Reached dirt position")
             self.add(Objective("clean"))
             return
         else:
-            self.add(Objective("move",[target]))
+            self.add("o","move",(target,))
 
 class testAgent(Agent):
     def __init__(self, name = 'test'):
         super().__init__(name,full_log=True)
-        self.add_plan(Plan("testing",[],self.testing))
+        self.add_plan([("testing",[],self.testing)])
         
     def testing(self,src,A):
         print(f"testing {A}")

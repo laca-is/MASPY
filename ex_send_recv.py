@@ -10,8 +10,12 @@ class Simple_Agent(Agent):
             ("run_information",[],Simple_Agent.run_information)
         ])
          
-    def send_information(self, src, target, msg):
-        self.send(target,"achieve",("run_information",msg))
+    def send_information(self, src, msg):
+        agents_list = ag1.find_in("Ch","comm","Simple_Agent")
+        for agents in agents_list.values():
+            for agent in agents:
+                if self.my_name != agent:
+                    self.send(agent,"achieve",("run_information",msg))
         self.stop_cycle()
 
     def run_information(self, src, info):
@@ -23,7 +27,6 @@ if __name__ == "__main__":
     ag2 = Simple_Agent("Ag",True)
     Coordinator().connect_to([ag1,ag2],[Channel()])
     # Adding initial Objective
-    print(ag1.find_in("Ch","comm","Simple_Agent"))
-    #ag1.add("obj","send_information",(ag2.my_name,f"Hello from the other side"))
-    #Coordinator().start_all_agents()
+    ag1.add("obj","send_information",(f"Hello from the other side"))
+    Coordinator().start_all_agents()
 

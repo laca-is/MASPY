@@ -98,13 +98,15 @@ class Coordinator(metaclass=CoordinatorMeta):
             if agent_name in self._started_agents:
                 self.print(f"'maspy.agent.Agent' {agent_name} already started")
                 return
-            self._started_agents.append(agent_name)
+
             agent = self._agents[agent_name]
+            self._started_agents.append(agent)
             agent.reasoning()
         except KeyError:
             self.print(f"'maspy.agent.Agent' {agent_name} not connected to environment")
             
     def stop_all_agents(self,sig,frame):
+        self.print(f"[Closing System]")
         for agent in self._started_agents:
             agent.stop_cycle()
     

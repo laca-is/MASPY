@@ -35,18 +35,6 @@ class Channel(metaclass=CommsMultiton):
         except TypeError:
             self._add_agent(agents)
 
-    '''
-    self.print(f"Adding {data_type}") if self.full_log else ...
-        for key, value in data_type.items():
-            if key in type_base and isinstance(value, dict):
-                for inner_key, inner_value in value.items():
-                    if inner_key in type_base[key] and isinstance(inner_value, set):
-                        type_base[key][inner_key].update(inner_value)
-                    else:
-                        type_base[key][inner_key] = inner_value 
-            else:
-                type_base[key] = value
-    '''
     def _add_agent(self, agent):
         if type(agent).__name__ in self.agent_list:
             if agent.my_name[0] in self.agent_list[type(agent).__name__]:
@@ -82,7 +70,7 @@ class Channel(metaclass=CommsMultiton):
         try:
             self._agents[target].recieve_msg(sender,act,msg)
         except KeyError:
-            self.print(f"> Agent {target} not connected")
+            self.print(f"Agent {target} not connected")
 
     def function_call(self, func):
         @wraps(func)
