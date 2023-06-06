@@ -2,13 +2,13 @@ from collections.abc import Iterable
 from typing import Optional
 from maspy.environment import Environment 
 from maspy.agent import Agent, Belief, Objective, Plan
-from maspy.coordinator import Control
+from maspy.coordinator import Coordinator
 
 class Room(Environment):
     def __init__(self, env_name='room'):
         super().__init__(env_name)
         self.full_log = False
-        self._create_fact("dirt",{(0,1): False, (2,2): False})
+        self.create_fact("dirt",{(0,1): False, (2,2): False})
 
     def add_dirt(self, position):
         print(f"{self._my_name}> Dirt created in position {position}")
@@ -104,7 +104,7 @@ class testAgent(Agent):
 def main(): 
     env = Room("Room")
     rbt = Robot('R1', initial_env=env, full_log=False)
-    rbt.reasoning_cycle()
+    rbt.reasoning()
     env.add_dirt((3,1))
     rbt.add(Objective("decide_move"))
 

@@ -1,18 +1,20 @@
+import threading
 from dataclasses import dataclass, field, astuple
 from maspy.environment import Environment
+from maspy.communication import Channel
 from maspy.error import (
     InvalidBeliefError,
     InvalidObjectiveError,
     InvalidPlanError,
     RunPlanError,
 )
-from maspy.coordinator import Control
+from maspy.coordinator import Coordinator
 from typing import List, Optional, Union, Dict, Set, Tuple, Any
 from collections.abc import Iterable, Callable
 from time import sleep
 import importlib as implib
 import inspect
-
+import signal
 
 @dataclass(eq=True, frozen=True)
 class Belief:
@@ -170,7 +172,7 @@ class Ask:
     reply: list = field(default_factory=list)
     source: str = "unknown"
 
-MSG = Belief | Ask | Objective
+MSG = Belief | Ask | Objective 
 
 class Agent:
     def __init__(
@@ -181,54 +183,95 @@ class Agent:
         plans: Optional[Iterable[Plan] | Plan] = None,
         full_log = False
     ):
-        self._type_belief_set = {Belief, "belief" , "belf" , "bel" , "b"}
-        self._type_objective_set = {Objective, "objective", "objtv", "obj", "o"}
+        self.stop_flag = None
+        self.thread = None
+        
+        self._type_belief_set = {Belief, "belief" , "belf" ,"blf", "bel" , "b"}
+        self._type_objective_set = {Objective, "objective", "objtv", "obj", "ob", "o"}
+        self._type_env_set = {Environment, "environment", "envrmnt", "env", "e"}
+        self._type_ch_set = {Channel, "channel", "chnnl", "ch", "c"}
+        self._data_types = {Belief,Objective,Ask,Plan}
         self.full_log = full_log
+        
         self.my_name = name
-        Control().add_agents(self)
-
-        self.__environments: Dict[str, Any] = {}
+        Coordinator().add_agents(self)
+        self._name = f"Agent:{self.my_name}"
+        
+        self._environments: Dict[str, Any] = {}
+        self._channels: Dict[str, Any] = {}
 
         self.__beliefs = self._clean(beliefs)
-        self.__new_beliefs = self._clean(None) #TODO - Better method for belief plan trigger
+        self.__old_beliefs = self._clean(beliefs)
         self.__objectives = self._clean(objectives)
         self.__plans = self._clean_plans(plans)
 
-        self.__default_channel = None
+        self.__default_channel = "comm"
         self.paused_agent = False
-        print(f"{self.my_name}> Initialized")
+        self.print(f"Initialized")
+
+    def print(self,*args, **kwargs):
+        return print(f"{self._name}>",*args,**kwargs)
 
     def set_default_channel(self, channel):
         self.__default_channel = channel
 
-    def add_focus_env(self, env_instance, env_name: str = 'env'):
-        self.__environments[env_name] = env_instance
+    def connect(self, target: Channel | Environment | str, target_name: str = "default", role_on_env: str = None):
+        match target:
+            case Environment():
+                self._environments[target._my_name] = [target,role_on_env]
+            case Channel():
+                self._channels[target._my_name] = target
+            case str():
+                classes = []
+                try:
+                    imported = implib.import_module(target)
+                except ModuleNotFoundError:
+                    self.print(f"No File named '{target_name}'")
+                    return
+                for name, obj in inspect.getmembers(imported):
+                    if inspect.isclass(obj) and name != "Environment" and name != "Channel":
+                        lineno = inspect.getsourcelines(obj)[1]
+                        classes.append((lineno, obj))
+                    if name == "Environment":
+                        connect_list = self._environments
+                    if name == "Channel":
+                        connect_list = self._channels
+                classes.sort()
+                target = classes[0][1](target_name)
+                connect_list[target_name] = target
+                del imported
+                
+        target.add_agents(self)
+        return target
 
-    def add_focus(self, environment: str, env_name: str = 'env') -> Environment:
+    def add_focus_env(self, env_instance: Environment, role_on_env: str = None):
+        self._environments[env_instance._my_name] = [env_instance,role_on_env]
+
+    def add_focus(self, environment: str, env_name: str = 'env', role_on_env: str = None) -> Environment:
         classes = []
         try:
             env = implib.import_module(environment)
         except ModuleNotFoundError:
-            print(f"{self.my_name}> No environment named '{env_name}'")
+            self.print(f"No environment named '{env_name}'")
             return
-        self.__environments = {env_name: {}}
+        self._environments = {env_name: {}}
         for name, obj in inspect.getmembers(env):
             if inspect.isclass(obj) and name != "Environment":
                 lineno = inspect.getsourcelines(obj)[1]
                 classes.append((lineno, obj))
         classes.sort()
-        self.__environments[env_name] = classes[0][1](env_name)
+        self._environments[env_name] = classes[0][1](env_name)
         del env
-        print(f"{self.my_name}> Connected to environment {env_name}")
-        return self.__environments[env_name]
+        self.print(f"Connected to environment {env_name}")
+        return self._environments[env_name]
 
     def rm_focus(self, environment: str):
-        del self.__environments[environment]
+        del self._environments[environment]
 
     def get_env(self, env_name: str):
-        return self.__environments[env_name]
+        return self._environments[env_name]
     
-    def add_plan(self, plan: List[Plan] | Plan):
+    def add_plan(self, plan: List[Plan | Tuple] | Plan | Tuple):
         plans = self._clean_plans(plan)
         self.__plans += plans
 
@@ -264,6 +307,9 @@ class Agent:
     def has_belief(self, belief: Belief):
         return belief in self.__beliefs.get(belief.source, {}).get(belief.key, {})
     
+    def has_old_belief(self, belief: Belief):
+        return belief in self.__old_beliefs.get(belief.source, {}).get(belief.key, {})
+    
     def add(
         self, 
         data_type: Belief | Objective | str, 
@@ -279,12 +325,11 @@ class Agent:
         data_type: Iterable[Belief | Objective] | Belief | Objective
     ):
         data_type = self._clean(data_type)
-        print(f"{self.my_name}> Adding {data_type}") if self.full_log else ...
+        self.print(f"Adding {data_type}") if self.full_log else ...
         for key, value in data_type.items():
             if key in type_base and isinstance(value, dict):
                 for inner_key, inner_value in value.items():
                     if inner_key in type_base[key] and isinstance(inner_value, set):
-                        #print(f"{inner_value} {type(inner_value)}")
                         type_base[key][inner_key].update(inner_value)
                     else:
                         type_base[key][inner_key] = inner_value 
@@ -324,7 +369,7 @@ class Agent:
                     else:
                         type_base[data_type.source][data_type.key].remove(data_type)
         except KeyError:
-            print(f"{self.my_name}> {data_type} doesn't exist | purge({purge_source})")
+            self.print(f"{data_type} doesn't exist | purge({purge_source})")
       
     def search(
         self, data_type: Belief | Objective | str, 
@@ -401,7 +446,7 @@ class Agent:
             key,args,source = (data_type.key,data_type.args,data_type.source)
             data_type = type(data_type)
         else:
-            print(f"{self.my_name}> Error in Central Typing for {type(data_type)}:{data_type}")
+            self.print(f"Error in Central Typing for {type(data_type)}:{data_type}")
             return None
         
         if data_type in self._type_belief_set:
@@ -430,21 +475,21 @@ class Agent:
 
     def _run_plan(self, plan: Plan, trigger: Belief | Objective):
         sleep(0.2)
-        print(f"{self.my_name}> Running {plan}")  if self.full_log else ...
+        self.print(f"Running {plan}")  if self.full_log else ...
         try:
-            return plan.body(self, trigger.source, *trigger.args)
+            return plan.body(self, trigger.source, *trigger._args)
         except KeyError:
-            print(f"{self.my_name}> {plan} doesn't exist")
+            self.print(f"{plan} doesn't exist")
             raise RunPlanError
 
     # TODO: implement stoping plan
     def _stop_plan(self, plan):
-        print(f"{self.my_name}> Stoping {plan})")  if self.full_log else ...
+        self.print(f"Stoping {plan})")  if self.full_log else ...
         pass
 
     def recieve_msg(self, sender, act, msg: MSG):
         if not act == "env_tell":
-            print(f"{self.my_name}> Received from {sender} : {act} -> {msg}")  if self.full_log else ...
+            self.print(f"Received from {sender} : {act} -> {msg}")  if self.full_log else ...
         match (act, msg):
             case ("tell", belief) if isinstance(belief, Belief):
                 self.add(belief)
@@ -482,33 +527,78 @@ class Agent:
             case _:
                 TypeError(f"Unknown type of message {act}:{msg}")
 
-    def send(self, target: str, act: str, msg: MSG, channel: str = None):
-        channel = self.__default_channel
+    def as_data_type(self, act, data):
+        match act:
+            case "tell" | "env_tell" | "untell":
+                return Belief(*data)
+            case "achieve" | "unachieve":
+                return Objective(*data)
+    
+    def send(self, target: str | tuple, act: str, msg: MSG | Tuple, channel: str = None):            
+        if msg not in self._data_types:
+            msg = self.as_data_type(act,msg)
+  
+        if channel is None:
+            channel = self.__default_channel
         msg = msg.update(source = self.my_name)
         match (act, msg):
             case ("askOne" | "askAll", belief) if isinstance(belief, Belief):
                 msg = Ask(belief, source=self.my_name)
 
-        print(f"{self.my_name}> Sending to {target} : {act} -> {msg}") if self.full_log else ...
-        self.send_msg(target, act, msg, channel)
+        self.print(f"Sending to {target} : {act} -> {msg}") if self.full_log else ...
+        try:
+            self._channels[channel]._send(self.my_name,target,act,msg)
+        except KeyError:
+            self.print(f"Not Connected to Selected Channel: {channel}")
+        #self.send_msg(target, act, msg, channel)
+    
+    def find_in(self, list_type, class_name, agent_name):
+        list_type = list_type.lower()
+        try:
+            if list_type in self._type_env_set:
+                return self._environments[class_name][0].agent_list[agent_name]
+            if list_type in self._type_ch_set:
+                return self._channels[class_name].agent_list[agent_name]
+        except KeyError:
+            self.print(f"Not connected to {list_type}:{class_name}")
+            
+    def execute(self,env_name):
+        try:
+            return self._environments[env_name][0]
+        except KeyError:
+            self.print(f"Not Connected to Environment:{env_name}")
 
     def send_msg(self, target: str, act: str, msg: MSG, channel: str):
         pass
 
-    def reasoning_cycle(self):
-        while self.__objectives:
+    def reasoning(self):
+        self.print(f"Starting Reasoning")
+        self.stop_flag = threading.Event()
+        self.thread = threading.Thread(target=self.cycle,args=(self.stop_flag,))
+        self.thread.start()
+        
+    def stop_cycle(self):
+        #sleep(3)
+        self.print("Shutting Down...")
+        self.stop_flag.set()
+        self.paused_agent = True
+            
+    def cycle(self, stop_flag):
+        while not stop_flag.is_set():            
             self._perception()
             #self.mail() #TODO better organized way of checking messages
             chosen_plan, trigger = self._deliberation()
-            result = self._execution(chosen_plan, trigger)
+            #self.print(f"{chosen_plan}")
+            if chosen_plan is not None:
+                result = self._execution(chosen_plan, trigger)
             sleep(1)
-        self.paused_agent = True
 
     def _perception(self):
-        for env_name in self.__environments:
-            print(f"{self.my_name}> Percepting '{env_name}'") if self.full_log else ...
-            perceived = self.__environments[env_name].perception()
-
+        for env_name in self._environments:
+            self.print(f"Percepting '{env_name}'") if self.full_log else ...
+            role_in_env = self._environments[env_name][1]
+            perceived = self._environments[env_name][0].perception(role_in_env)
+            #self.print(f"Perceiving: {perceived}")
             self.rm(Belief(None,None,env_name),purge_source=True)
             for key, value in perceived.items():
                 self.add(Belief(key,value,env_name))
@@ -520,11 +610,11 @@ class Agent:
                 1 for param in inspect.signature(plan.body).parameters.values()
                 if param.default is param.empty and param.name != 'self'
             ) - 1
-            
+            #self.print(f"Checking {plan} {num_args}")
             trigger = self.search(Objective,plan.trigger,num_args)
             if not trigger:
                 trigger = self.search(Belief,plan.trigger,num_args)
-                if not trigger:
+                if not trigger or self.has_old_belief(trigger):
                     continue
             
             for context in plan.context:
@@ -536,15 +626,17 @@ class Agent:
     
     def _execution(self, chosen_plan, trigger):
         if not chosen_plan:
-            print("No plan found")
+            self.print(f"No plan found")
             return None
-        print(f"{self.my_name}> Execution of {chosen_plan.trigger}:{trigger}") if self.full_log else ...
+        self.print(f"Execution of {chosen_plan.trigger}:{trigger}") if self.full_log else ...
         try:
             if type(trigger) is Objective:
                 self.rm(trigger)
+            if type(trigger) is Belief:
+                self._adding(self.__old_beliefs,trigger) #TODO : Also remove beliefs form OLD when removing from normal
             return self._run_plan(chosen_plan, trigger)
         except RunPlanError:
-            print(f"{self.my_name}> {chosen_plan} failed")
+            self.print(f"{chosen_plan} failed")
 
     # TODO: should invalid arguments be an error or a warning?
     def _clean(
@@ -590,6 +682,8 @@ class Agent:
                 for plan in plans:
                     if isinstance(plan, Plan):
                         plan_list.append(plan)
+                    if isinstance(plan,Tuple):
+                        plan_list.append(Plan(*plan))
                         
                 return plan_list
             case _:

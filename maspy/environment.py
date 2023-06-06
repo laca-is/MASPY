@@ -12,26 +12,45 @@ class EnvironmentMultiton(type):
                 cls._instances[__my_name] = instance
         return cls._instances[__my_name]
 
-
 class Environment(metaclass=EnvironmentMultiton):
     def __init__(self, env_name: str):
         self.full_log = False
         self._my_name = env_name
-        self.__env_channel = None
+        self.agent_list = {}
+        self._agents = {}
+        self._name = f"Environment:{self._my_name}"
         self._facts: Dict[str, Any] = {"any": {}}
         self._roles = {"any"}
     
-    def perception(self):
-        return self._get_facts("all")
+    def print(self,*args, **kwargs):
+        return print(f"{self._name}>",*args,**kwargs)
     
-    def add_channel(self, channel):
-        self.__env_channel = channel
+    def perception(self,role):
+        return self._get_facts(role)
+    
+    def add_agents(self, agents):
+        try:
+            for agent in agents:
+                self._add_agent(agent)
+            #self.send_agents_list()
+        except TypeError:
+            self._add_agent(agents)
+    
+    def _add_agent(self, agent):
+        if agent.my_name not in self._agents:
+            
+            self.agent_list[type(agent).__name__] = agent.my_name
+            self._agents[agent.my_name] = agent
+            
+            self.print(f'Connecting agent {type(agent).__name__}:{agent.my_name} to Environment')
+        else:
+            self.print(f'Agent {type(agent).__name__}:{agent.my_name} already connected')
     
     def _add_role(self, role_name: str):
         if type(role_name) == str:
             self._roles.add(role_name)
         else:
-            print(f"{self._my_name}> role *{role_name}* is not a string")
+            self.print(f"role *{role_name}* is not a string")
 
     def _rm_role(self, role_name: str):
         self._roles.remove(role_name)
@@ -48,7 +67,7 @@ class Environment(metaclass=EnvironmentMultiton):
         except KeyError:
             return None
     
-    def _create_fact(self, name: str, data: Any, role="any"):
+    def create_fact(self, name: str, data: Any, role="any"):
         if role != "any":
             if role not in self._roles:
                 self._add_role(role)
@@ -57,35 +76,32 @@ class Environment(metaclass=EnvironmentMultiton):
             if name not in self._facts[role]:
                 self._facts[role].update({name : data})
             else:
-                print(f"{self._my_name}> Fact *{name}:{role}* already created")
+                self.print(f"> Fact *{name}:{role}* already created")
         else:
             self._facts[role] = {name: data}
-        print(f'{self._my_name}> Creating fact {role}:{name}:{data}') if self.full_log else ...
+        self.print(f"Creating fact {role}:{name}:{data}") if self.full_log else ...
 
-    def _update_fact(self, name: str, data: Any, role="any"):
+    def update_fact(self, name: str, data: Any, role="any"):
         if self._fact_exists(name, role):
-            print(f"{self._my_name}> Updating fact {role}:{name}:[{self._facts[role][name]} > ",end="") if self.full_log else ...
+            self.print(f"Updating fact {role}:{name}:[{self._facts[role][name]} > ",end="") if self.full_log else ...
             self._facts[role] = {name: data}
             print(f"{self._facts[role][name]}]") if self.full_log else ...
+            
     def _extend_fact(self, name: str, data: str, role="any"):
         if not self._fact_exists(name, role):
             return
         try:
-            print(f"{self._my_name}> Extending fact {role}:{name}[{self._facts[role][name]} > ",end="") if self.full_log else ...
+            self.print(f"Extending fact {role}:{name}[{self._facts[role][name]} > ",end="") if self.full_log else ...
             match self._facts[role][name]:
                 case list() | tuple():
                     self._facts[role][name].append(data)
                 case dict() | set():
                     self._facts[role][name].update(data)
                 case int() | float() | str():
-                    print(
-                        f"{self._my_name}> Impossible to extend fact {name}:{type(data)}"
-                    )
+                    self.print(f"Impossible to extend fact {name}:{type(data)}")
             print(f"{self._facts[role][name]}]") if self.full_log else ...
         except (TypeError, ValueError):
-            print(
-                f"{self._my_name}> Fact {name}:{type(self._facts[role][name])} can't extend {type(data)}"
-            )
+            self.print(f"Fact {name}:{type(self._facts[role][name])} can't extend {type(data)}")
 
     def _reduce_fact(self, name, data, role="any"):
         if not self._fact_exists(name, role):
@@ -100,19 +116,15 @@ class Environment(metaclass=EnvironmentMultiton):
                     old_tuple = self._facts[role][name]
                     self._facts[role][name] = tuple(x for x in old_tuple if x != data)
                 case int() | float() | str():
-                    print(
-                        f"{self._my_name}> Impossible to reduce fact {name}:{type(data)}"
-                    )
+                    self.print(f"> Impossible to reduce fact {name}:{type(data)}")
         except (KeyError, ValueError):
-            print(
-                f"{self._my_name}> Fact {name}:{type(self._facts[role][name])} doesn't contain {data}"
-            )
+            self.print(f"> Fact {name}:{type(self._facts[role][name])} doesn't contain {data}")
 
     def _fact_exists(self, name: str, role: str) -> bool:
         try:
             self._facts[role][name]
         except KeyError:
-            print(f"{self._my_name}> Fact {name}:{role} doesn't exist")
+            self.print(f"> Fact {name}:{role} doesn't exist")
             return False
         return True
 
@@ -134,5 +146,4 @@ class Environment(metaclass=EnvironmentMultiton):
                 for fact in self._facts[role]:
                     found_facts[fact] = self._facts[role][fact]
         return found_facts
-
 

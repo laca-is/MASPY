@@ -1,18 +1,13 @@
-import random
 from threading import Lock
 from typing import Any, Dict, List, Union
 from collections.abc import Iterable
-
 import maspy.agent
+from maspy.environment import Environment
+from maspy.communication import Channel
+import signal
+import random
 
-"""
-    Class for abstract control of all agents
-        -Unique Identification
-        -Management
-        -Initialization
-"""
-
-class ControlMeta(type):
+class CoordinatorMeta(type):
     _instances: Dict[str, Any] = {}
     _lock: Lock = Lock()
 
@@ -24,15 +19,20 @@ class ControlMeta(type):
         return cls._instances[cls]
 
 
-class Control(metaclass=ControlMeta):
-    def __init__(self, ctrl_name="ctrl") -> None:
-        self.__my_name = ctrl_name
-        self.__started_agents: List["maspy.agent.Agent"] = []
-        self.__agent_list: Dict[str, str] = {}
-        self.__agents: Dict[str, "maspy.agent.Agent"] = {}
+class Coordinator(metaclass=CoordinatorMeta):
+    def __init__(self, ctrl_name="Crdnt") -> None:
+        signal.signal(signal.SIGINT, self.stop_all_agents)
+        self._my_name = ctrl_name
+        self._name = f"{type(self).__name__}:{self._my_name}"
+        self._started_agents: List["maspy.agent.Agent"] = []
+        self._agent_list: Dict[str, str] = {}
+        self._agents: Dict[str, "maspy.agent.Agent"] = {}
+
+    def print(self,*args, **kwargs):
+        return print(f"{self._name}>",*args,**kwargs)
 
     def get_agents(self) -> Dict[str, str]:
-        return self.__agent_list
+        return self._agent_list
 
     def add_agents(
         self, agents: Union[Iterable["maspy.agent.Agent"], "maspy.agent.Agent"]
@@ -44,17 +44,14 @@ class Control(metaclass=ControlMeta):
             self._add_agent(agents)
 
     def _add_agent(self, agent: "maspy.agent.Agent"):
-        agent.my_name = f"{agent.my_name}#{random.randint(1000,9999)}"
-        if agent.my_name in self.__agents:
-            aux = agent.my_name.split("#")
-            while "#".join(aux) in self.__agents:
-                aux[-1] = str(random.randint(1000, 9999))
+        agent.my_name = (agent.my_name,random.randint(1000,9999))
+        while agent.my_name in self._agents:
+            agent.my_name[1] = random.randint(1000, 9999)
 
-            agent.my_name = "#".join(aux)
-        self.__agent_list[agent.my_name] = type(agent).__name__
-        self.__agents[agent.my_name] = agent
-        print(
-            f"{self.__my_name}> Adding agent {type(agent).__name__}:{agent.my_name} to System"
+        self._agent_list[agent.my_name] = type(agent).__name__
+        self._agents[agent.my_name] = agent
+        self.print(
+            f"Adding Agent {type(agent).__name__}:{agent.my_name} to List"
         )
 
     def rm_agents(
@@ -67,48 +64,60 @@ class Control(metaclass=ControlMeta):
             self._rm_agent(agents)
 
     def _rm_agent(self, agent: "maspy.agent.Agent"):
-        if agent.my_name in self.__agents:
-            del self.__agents[agent.my_name]
-            del self.__agent_list[agent.my_name]
-        print(
-            f"{self.__my_name}> Removing agent {type(agent).__name__}:{agent.my_name} from System"
+        if agent.my_name in self._agents:
+            del self._agents[agent.my_name]
+            del self._agent_list[agent.my_name]
+        self.print(
+            f"Removing agent {type(agent).__name__}:{agent.my_name} from List"
         )
 
     def start_all_agents(self):
         no_agents = True
 
-        print(f"{self.__my_name}> Starting all connected agents")
-        for agent_name in self.__agents:
+        self.print(f"Starting all connected agents")
+        for agent_name in self._agents:
             no_agents = False
             self._start_agent(agent_name)
 
         if no_agents:
-            print(f"{self.__my_name}> No agents are connected")
+            self.print(f"No agents are connected")
 
     def start_agents(
         self, agents: Union[Iterable["maspy.agent.Agent"], "maspy.agent.Agent"]
     ):
         try:
-            print(f"{self.__my_name}> Starting listed agents")
+            self.print(f"Starting listed agents")
             for agent in agents:
                 self._start_agent(agent.my_name)
         except TypeError:
-            print(
-                f"{self.__my_name}> Starting agent {type(agents).__name__}:{agents.my_name}"
-            )
+            self.print(f"Starting agent {type(agents).__name__}:{agents.my_name}")
             self._start_agent(agents.my_name)
 
     def _start_agent(self, agent_name: "maspy.agent.Agent") -> None:
         try:
-            if agent_name in self.__started_agents:
-                print(
-                    f"{self.__my_name}> 'maspy.agent.Agent' {agent_name} already started"
-                )
+            if agent_name in self._started_agents:
+                self.print(f"'maspy.agent.Agent' {agent_name} already started")
                 return
-            self.__started_agents.append(agent_name)
-            agent = self.__agents[agent_name]
-            agent.reasoning_cycle()
+            self._started_agents.append(agent_name)
+            agent = self._agents[agent_name]
+            agent.reasoning()
         except KeyError:
-            print(
-                f"{self.__my_name}> 'maspy.agent.Agent' {agent_name} not connected to environment"
-            )
+            self.print(f"'maspy.agent.Agent' {agent_name} not connected to environment")
+            
+    def stop_all_agents(self,signal,frame):
+        for agent in self._started_agents:
+            agent.stop_cycle()
+    
+    def connect_to(self, agents: Iterable, targets: Iterable[Environment | Channel]):
+        for agent in agents:
+            if type(agent) not in (tuple,list):
+                agent =  [agent,"any"]
+            for target in targets:
+                match target:
+                    case Environment():
+                        agent[0]._environments[target._my_name] = [target,agent[1]]
+                    case Channel():
+                        agent[0]._channels[target._my_name] = target
+                           
+                target._add_agent(agent[0])
+

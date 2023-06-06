@@ -2,12 +2,10 @@ import inspect
 import random
 from threading import Lock
 from functools import wraps
-from typing import Dict
-from maspy.agent import Agent, Belief
-
+from typing import List, Optional, Union, Dict, Set, Tuple, Any
 
 class CommsMultiton(type):
-    _instances: Dict[str, "Comms"] = {}
+    _instances: Dict[str, "Channel"] = {}
     _lock: Lock = Lock()
 
     def __call__(cls, __my_name="comm"):
@@ -18,62 +16,89 @@ class CommsMultiton(type):
         return cls._instances[__my_name]
 
 
-class Comms(metaclass=CommsMultiton):
+class Channel(metaclass=CommsMultiton):
     def __init__(self, env_name) -> None:
-        self.__my_name = env_name
-        self.__agent_list = {}
-        self.__agents = {}
-        Agent.send_msg = self.function_call(Agent.send_msg)
+        self._my_name = env_name
+        self.agent_list = {}
+        self._agents = {}
+        self._name = f"{type(self).__name__}:{self._my_name}"
+        #Agent.send_msg = self.function_call(Agent.send_msg)
+        
+    def print(self,*args, **kwargs):
+        return print(f"{self._name}>",*args,**kwargs)
     
     def add_agents(self, agents):
         try:
             for agent in agents:
                 self._add_agent(agent)
+            #self.send_agents_list()
         except TypeError:
             self._add_agent(agents)
 
+    '''
+    self.print(f"Adding {data_type}") if self.full_log else ...
+        for key, value in data_type.items():
+            if key in type_base and isinstance(value, dict):
+                for inner_key, inner_value in value.items():
+                    if inner_key in type_base[key] and isinstance(inner_value, set):
+                        type_base[key][inner_key].update(inner_value)
+                    else:
+                        type_base[key][inner_key] = inner_value 
+            else:
+                type_base[key] = value
+    '''
     def _add_agent(self, agent):
-        if agent.my_name not in  self.__agent_list:
-            self.__agent_list[agent.my_name] = type(agent).__name__
-            self.__agents[agent.my_name] = agent
-            print(f'{self.__my_name}> Connecting agent {type(agent).__name__}:{agent.my_name} to channel')
+        if agent.my_name not in self._agents:
+            
+            self.agent_list[type(agent).__name__] = agent.my_name
+            self._agents[agent.my_name] = agent
+            
+            self.print(f'> Connecting agent {type(agent).__name__}:{agent.my_name} to channel')
         else:
-            print(f'{self.__my_name}> Agent {type(agent).__name__}:{agent.my_name} already connected')
+            self.print(f'> Agent {type(agent).__name__}:{agent.my_name} already connected')
+            
     def _rm_agents(self, agents):
         try:
             for agent in agents:
                 self._rm_agent(agent)
         except TypeError:
             self._rm_agent(agents)
-        self.send_agents_list()
+        #self.send_agents_list()
 
     def _rm_agent(self, agent):
-        if agent.my_name in self.__agents:
-            del self.__agents[agent.my_name]
-            del self.__agent_list[agent.my_name]
-        print(
-            f"{self.__my_name}> Desconnecting agent {type(agent).__name__}:{agent.my_name} from channel"
+        if agent.my_name in self._agents:
+            del self._agents[agent.my_name]
+            del self.agent_list[agent.my_name]
+        self.print(
+            f"> Desconnecting agent {type(agent).__name__}:{agent.my_name} from channel"
         )
 
+    def _send(self, sender, target, act, msg):            
+        try:
+            self._agents[target].recieve_msg(sender,act,msg)
+        except KeyError:
+            self.print(f"> Agent {target} not connected")
+    
     def send_agents_list(self):
-        for agent_name in self.__agents:
-            self.__agents[agent_name].recieve_msg(
-                agent_name, "env_tell", Belief("Agents", [self.__agent_list])
+        for agent_name in self._agents:
+            self._agents[agent_name].recieve_msg(
+                agent_name, "env_tell", Belief("Agents", [self.agent_list], self._my_name)
             )
 
     def function_call(self, func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if args[-1] == self.__my_name or args[-1] == 'broadcast':
+            if args[-1] == self._my_name or args[-1] == 'broadcast':
                 arg_values = inspect.getcallargs(func, *args, **kwargs)
                 msg = {}
                 for key,value in arg_values.items():
                     msg[key] = value 
                 try:
-                    self.__agents[msg['target']].recieve_msg(msg['self']\
+                    self.print(f"> Sending a message {msg['self'].my_name}>{msg['target']}")
+                    self._agents[msg['target']].recieve_msg(msg['self']\
                                     .my_name,msg['act'],msg['msg'])
                 except(KeyError):
-                    print(f"{self.__my_name}> Agent {msg['target']} not connected")
+                    self.print(f"> Agent {msg['target']} not connected")
 
                 return func(*args, **kwargs)
             
