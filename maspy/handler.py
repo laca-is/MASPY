@@ -7,7 +7,7 @@ from maspy.communication import Channel
 import signal
 import random
 
-class CoordinatorMeta(type):
+class HandlerMeta(type):
     _instances: Dict[str, Any] = {}
     _lock: Lock = Lock()
 
@@ -19,7 +19,7 @@ class CoordinatorMeta(type):
         return cls._instances[cls]
 
 
-class Coordinator(metaclass=CoordinatorMeta):
+class Handler(metaclass=HandlerMeta):
     def __init__(self, ctrl_name="Crdnt") -> None:
         signal.signal(signal.SIGINT, self.stop_all_agents)
         self._my_name = ctrl_name

@@ -1,32 +1,30 @@
 from maspy.agent import Agent
 from maspy.communication import Channel
-from maspy.coordinator import Coordinator
+from maspy.handler import Handler
 
-class Simple_Agent(Agent):
+class Sample(Agent):
     def __init__(self, agent_name, log=False):
         super().__init__(agent_name,full_log=log)
         self.add_plan([
-            ("send_information",[],Simple_Agent.send_information),
-            ("run_information",[],Simple_Agent.run_information)
+            ("send_info",[("blf","Sender")],Sample.send_info),
+            ("receive_info",[],Sample.recv_info)
         ])
          
-    def send_information(self, src, msg):
-        agents_list = ag1.find_in("Ch","comm","Simple_Agent")
-        for agents in agents_list.values():
-            for agent in agents:
-                if self.my_name != agent:
-                    self.send(agent,"achieve",("run_information",msg))
+    def send_info(self, src, msg):
+        agents_list = self.find_in("Sample","Channel")["Receiver"]
+        for agent in agents_list:
+            self.send(agent,"achieve",("receive_info",msg))
         self.stop_cycle()
 
-    def run_information(self, src, info):
-        self.print(f"Information [{info}] - Received from {src}!")
+    def recv_info(self, src, msg):
+        self.print(f"Information [{msg}] - Received from {src}")
         self.stop_cycle()
 
 if __name__ == "__main__":
-    ag1 = Simple_Agent("Ag",True)
-    ag2 = Simple_Agent("Ag",True)
-    Coordinator().connect_to([ag1,ag2],[Channel()])
-    # Adding initial Objective
-    ag1.add("obj","send_information",(f"Hello from the other side"))
-    Coordinator().start_all_agents()
+    sender = Sample("Sender",True)
+    sender.add("belief","Sender")
+    sender.add("obj","send_info",("Hello",))
+    receiver = Sample("Receiver",True)
+    Handler().connect_to([sender,receiver],[Channel()])
+    Handler().start_all_agents()
 

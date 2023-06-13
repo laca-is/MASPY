@@ -2,7 +2,7 @@ from collections.abc import Iterable
 from typing import Optional
 from maspy.environment import Environment 
 from maspy.agent import Agent, Belief, Objective, Plan
-from maspy.coordinator import Coordinator
+from maspy.handler import Handler
 
 class Room(Environment):
     def __init__(self, env_name='room'):
@@ -31,7 +31,7 @@ class Robot(Agent):
             ("clean",[],Robot.clean),
             ("move",[],Robot.move)
         ])
-        self.connect(initial_env)
+        self.connect_to(initial_env)
         self.add("o","decide_move")
         self.add("b","room_is_dirty")
         self.position = (0,0)
@@ -64,7 +64,7 @@ class Robot(Agent):
                                  
     def clean(self,src):
         if self.has_belief(Belief("room_is_dirty")):
-            self.execute("Room").clean_position(self.my_name, self.position)
+            self.execute_in("Room").clean_position(self.my_name, self.position)
             self.add(Objective("decide_move"))
     
     def move(self,src,target):

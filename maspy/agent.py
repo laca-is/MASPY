@@ -8,7 +8,7 @@ from maspy.error import (
     InvalidPlanError,
     RunPlanError,
 )
-from maspy.coordinator import Coordinator
+from maspy.handler import Handler
 from typing import List, Optional, Union, Dict, Set, Tuple, Any
 from collections.abc import Iterable, Callable
 from time import sleep
@@ -194,7 +194,7 @@ class Agent:
         self.full_log = full_log
         
         self.my_name = name
-        Coordinator().add_agents(self)
+        Handler().add_agents(self)
         self._name = f"Agent:{self.my_name}"
         
         self._environments: Dict[str, Any] = {}
@@ -215,7 +215,7 @@ class Agent:
     def set_default_channel(self, channel):
         self.__default_channel = channel
 
-    def connect(self, target: Channel | Environment | str, target_name: str = "default", role_on_env: str = None):
+    def connect_to(self, target: Channel | Environment | str, target_name: str = "default", role_on_env: str = None):
         match target:
             case Environment():
                 self._environments[target._my_name] = [target,role_on_env]
@@ -552,17 +552,21 @@ class Agent:
             self.print(f"Not Connected to Selected Channel: {channel}")
         #self.send_msg(target, act, msg, channel)
     
-    def find_in(self, list_type, class_name, agent_name):
-        list_type = list_type.lower()
+    def find_in(self, agent_name, cls_type=None, cls_name=["env","comm"], cls_instance=None):
+        cls_type = cls_type.lower()
         try:
-            if list_type in self._type_env_set:
-                return self._environments[class_name][0].agent_list[agent_name]
-            if list_type in self._type_ch_set:
-                return self._channels[class_name].agent_list[agent_name]
+            if cls_instance:
+                return cls_instance.agent_list[agent_name]
+            if cls_type in self._type_env_set:
+                cls_name = cls_name[0] if type(cls_name) == list else cls_name  
+                return self._environments[cls_name][0].agent_list[agent_name]
+            if cls_type in self._type_ch_set:
+                cls_name = cls_name[1] if type(cls_name) == list else cls_name  
+                return self._channels[cls_name].agent_list[agent_name]
         except KeyError as ke:
-            self.print(f"Not connected to {list_type}:{class_name}:{ke}")
+            self.print(f"Not connected to {cls_type}:{cls_name}:{ke}")
             
-    def execute(self,env_name):
+    def execute_in(self,env_name):
         try:
             return self._environments[env_name][0]
         except KeyError:
