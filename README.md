@@ -5,6 +5,7 @@ Doing:
   
 Todo:
   - Implement all types of messages acts
+  - Implement Descriptive Componet to Methods
   - Make better error managment
   - Look into a more robust reasoning cycle
   - Warning System and depuration of Code
