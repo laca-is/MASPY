@@ -373,10 +373,10 @@ class Agent:
       
     def search(
         self, data_type: Belief | Objective | str, 
-        key: str = None, args: int | Any = None, 
+        key: str, args: int | Any = None, 
         source: str = None,
         all = False
-    ) -> Optional[Belief | Objective]:
+    ) -> Optional[Belief | Objective | List]:
         if all:
             return self._central("search-all",data_type,key,args,source)
         else:    
@@ -407,7 +407,7 @@ class Agent:
                 for src in type_base:
                     for data_type in type_base[src].get(key, {}):
                         if (type(args) is int and data_type.args_len == args)\
-                            or data_type.args == args:
+                            or data_type.args == args or data_type._args == args:
                             if all:
                                 found_data.append(data_type)
                             else:
@@ -428,14 +428,16 @@ class Agent:
             case _,str():
                 for data_type in type_base.get(source, {}).get(key, {}):
                     if (type(args) is int and data_type and data_type.args_len == args)\
-                        or (data_type and data_type.args == args):
+                        or (data_type and ( data_type.args == args or data_type._args == args)):
                             if all:
                                 found_data.append(data_type)
                             else:
                                 found_data = data_type
                                 break
-            
-        return found_data
+        if found_data or all:    
+            return found_data
+        else:
+            return None
 
     def _central(self,def_type,data_type,key,args,source):
         if type(data_type) is str:
