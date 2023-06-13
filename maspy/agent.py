@@ -474,7 +474,7 @@ class Agent:
                 return self._searching(type_base,key,args,source,True)
 
     def _run_plan(self, plan: Plan, trigger: Belief | Objective):
-        sleep(0.2)
+        # sleep(0.2)
         self.print(f"Running {plan}")  if self.full_log else ...
         try:
             return plan.body(self, trigger.source, *trigger._args)
@@ -595,7 +595,7 @@ class Agent:
             #self.print(f"{chosen_plan}")
             if chosen_plan is not None:
                 result = self._execution(chosen_plan, trigger)
-            sleep(1)
+            # sleep(1)
 
     def _perception(self):
         for env_name in self._environments:

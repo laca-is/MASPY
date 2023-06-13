@@ -1,7 +1,6 @@
 from threading import Lock
 from typing import Any, Dict, List, Union
 from collections.abc import Iterable
-import maspy.agent
 from maspy.environment import Environment
 from maspy.communication import Channel
 import signal
@@ -24,9 +23,9 @@ class Handler(metaclass=HandlerMeta):
         signal.signal(signal.SIGINT, self.stop_all_agents)
         self._my_name = ctrl_name
         self._name = f"{type(self).__name__}:{self._my_name}"
-        self._started_agents: List["maspy.agent.Agent"] = []
+        self._started_agents: List["Agent"] = []
         self._agent_list: Dict[str, str] = {}
-        self._agents: Dict[str, "maspy.agent.Agent"] = {}
+        self._agents: Dict[str, "Agent"] = {}
 
     def print(self,*args, **kwargs):
         return print(f"{self._name}>",*args,**kwargs)
@@ -35,7 +34,7 @@ class Handler(metaclass=HandlerMeta):
         return self._agent_list
 
     def add_agents(
-        self, agents: Union[Iterable["maspy.agent.Agent"], "maspy.agent.Agent"]
+        self, agents: Union[Iterable["Agent"], "Agent"]
     ):
         try:
             for agent in agents:
@@ -43,7 +42,7 @@ class Handler(metaclass=HandlerMeta):
         except TypeError:
             self._add_agent(agents)
 
-    def _add_agent(self, agent: "maspy.agent.Agent"):
+    def _add_agent(self, agent: "Agent"):
         agent.my_name = (agent.my_name,random.randint(1000,9999))
         while agent.my_name in self._agents:
             agent.my_name[1] = random.randint(1000, 9999)
@@ -55,7 +54,7 @@ class Handler(metaclass=HandlerMeta):
         )
 
     def rm_agents(
-        self, agents: Union[Iterable["maspy.agent.Agent"], "maspy.agent.Agent"]
+        self, agents: Union[Iterable["Agent"], "Agent"]
     ):
         try:
             for agent in agents:
@@ -63,7 +62,7 @@ class Handler(metaclass=HandlerMeta):
         except TypeError:
             self._rm_agent(agents)
 
-    def _rm_agent(self, agent: "maspy.agent.Agent"):
+    def _rm_agent(self, agent: "Agent"):
         if agent.my_name in self._agents:
             del self._agents[agent.my_name]
             del self._agent_list[agent.my_name]
@@ -83,7 +82,7 @@ class Handler(metaclass=HandlerMeta):
             self.print(f"No agents are connected")
 
     def start_agents(
-        self, agents: Union[Iterable["maspy.agent.Agent"], "maspy.agent.Agent"]
+        self, agents: Union[Iterable["Agent"], "Agent"]
     ):
         try:
             self.print(f"Starting listed agents")
@@ -93,17 +92,17 @@ class Handler(metaclass=HandlerMeta):
             self.print(f"Starting agent {type(agents).__name__}:{agents.my_name}")
             self._start_agent(agents.my_name)
 
-    def _start_agent(self, agent_name: "maspy.agent.Agent") -> None:
+    def _start_agent(self, agent_name: "Agent") -> None:
         try:
             if agent_name in self._started_agents:
-                self.print(f"'maspy.agent.Agent' {agent_name} already started")
+                self.print(f"'Agent' {agent_name} already started")
                 return
 
             agent = self._agents[agent_name]
             self._started_agents.append(agent)
             agent.reasoning()
         except KeyError:
-            self.print(f"'maspy.agent.Agent' {agent_name} not connected to environment")
+            self.print(f"'Agent' {agent_name} not connected to environment")
             
     def stop_all_agents(self,sig,frame):
         self.print(f"[Closing System]")

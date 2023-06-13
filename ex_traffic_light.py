@@ -1,7 +1,8 @@
-from maspy.agent import Agent
 from maspy.environment import Environment
 from maspy.communication import Channel
+
 from maspy.handler import Handler
+from maspy.agent import Agent
 
 class Crossing(Environment):
     def __init__(self, env_name):
