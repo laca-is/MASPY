@@ -180,12 +180,11 @@ class Agent:
         name: str,
         beliefs: Optional[Iterable[Belief] | Belief] = None,
         objectives: Optional[Iterable[Objective] | Objective] = None,
-        plans: Optional[Iterable[Plan] | Plan] = None,
         full_log = False
-    ):
+    ):              
         self.stop_flag = None
         self.thread = None
-        
+
         self._type_belief_set = {Belief, "belief" , "belf" ,"blf", "bel" , "b"}
         self._type_objective_set = {Objective, "objective", "objtv", "obj", "ob", "o"}
         self._type_env_set = {Environment, "environment", "envrmnt", "env", "e"}
@@ -203,15 +202,31 @@ class Agent:
         self.__beliefs = self._clean(beliefs)
         self.__old_beliefs = self._clean(beliefs)
         self.__objectives = self._clean(objectives)
-        self.__plans = self._clean_plans(plans)
-
+        
         self.__default_channel = "comm"
         self.paused_agent = False
-        self.print(f"Initialized")
+        self.print(f"Initialized") 
 
     def print(self,*args, **kwargs):
         return print(f"{self._name}>",*args,**kwargs)
-
+    
+    def test(self, a):
+        print(a)
+    
+    @staticmethod
+    def plan(trigger, context=[]):
+        class decorator:
+            def __init__(self,func):
+                self.func = func
+            
+            def __set_name__(self, instance, name):
+                plan = Plan(trigger,context,self.func)
+                try:
+                    instance._plans += [plan]
+                except AttributeError:
+                    instance._plans = [plan]
+        return decorator
+    
     def set_default_channel(self, channel):
         self.__default_channel = channel
 
@@ -273,10 +288,10 @@ class Agent:
     
     def add_plan(self, plan: List[Plan | Tuple] | Plan | Tuple):
         plans = self._clean_plans(plan)
-        self.__plans += plans
+        self._plans += plans
 
     def rm_plan(self, plan: Plan):
-        self.__plans.pop(plan)
+        self._plans.pop(plan)
 
     @property
     def print_beliefs(self):
@@ -288,7 +303,7 @@ class Agent:
     
     @property
     def print_plans(self):
-        print("Plans:",self.__plans)
+        print("Plans:",self._plans)
 
     def has_close(
         self, 
@@ -610,7 +625,7 @@ class Agent:
                 self.add(Belief(key,value,env_name))
     
     def _deliberation(self):
-        for plan in self.__plans:
+        for plan in self._plans:
             trigger = None
             num_args = sum(
                 1 for param in inspect.signature(plan.body).parameters.values()

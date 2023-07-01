@@ -17,8 +17,8 @@ class Crossing(Environment):
 class Cross_Manager(Agent):
     def __init__(self, mg_name):
         super().__init__(mg_name,full_log=False)
-        self.add_plan([("traffic_light",[],Cross_Manager.traffic_light)])
-    
+        
+    @Agent.plan("traffic_light")
     def traffic_light(self,src,color):
         vehicles = self.find_in("Vehicle","Env","Cross_Junction")
         for vehicle in vehicles["Vehicle"]:
@@ -28,8 +28,8 @@ class Cross_Manager(Agent):
 class Vehicle(Agent):
     def __init__(self, vh_name):
         super().__init__(vh_name,full_log=False)
-        self.add_plan([("crossing_over",[],Vehicle.crossing)])
     
+    @Agent.plan("crossing_over")
     def crossing(self,src):
         self.print(f"Confirmation for crossing by {src}")
         self.execute_in("Cross_Junction").cross(self)

@@ -26,11 +26,6 @@ class Room(Environment):
 class Robot(Agent):
     def __init__(self, name, initial_env=None, full_log=False):
         super().__init__(name, full_log=full_log)
-        self.add_plan([
-            ("decide_move",[],Robot.decide_move),
-            ("clean",[],Robot.clean),
-            ("move",[],Robot.move)
-        ])
         self.connect_to(initial_env)
         self.add("o","decide_move")
         self.add("b","room_is_dirty")
@@ -38,7 +33,7 @@ class Robot(Agent):
         self.print_beliefs
         self.print(f"Inicial position {self.position}")
 
-    
+    @Agent.plan("decide_move")
     def decide_move(self,src):
         min_dist = float("inf")
         target = None
@@ -61,12 +56,14 @@ class Robot(Agent):
         else:
             print(f"{self.my_name}> Moving to {target}")
             self.add("o","move",(target,))
-                                 
+    
+    @Agent.plan("clean")                            
     def clean(self,src):
         if self.has_belief(Belief("room_is_dirty")):
             self.execute_in("Room").clean_position(self.my_name, self.position)
             self.add(Objective("decide_move"))
     
+    @Agent.plan("move")
     def move(self,src,target):
         x, y = self.position
 
@@ -94,14 +91,6 @@ class Robot(Agent):
             return
         else:
             self.add("o","move",(target,))
-
-class testAgent(Agent):
-    def __init__(self, name = 'test'):
-        super().__init__(name,full_log=True)
-        self.add_plan([("testing",[],self.testing)])
-        
-    def testing(self,src,A):
-        print(f"testing {A}")
 
 def main(): 
     env = Room("Room")
