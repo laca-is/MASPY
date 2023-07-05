@@ -168,11 +168,18 @@ class Plan:
         
 @dataclass
 class Ask:
-    belief: Belief
+    data_type: Belief | Objective | str
     reply: list = field(default_factory=list)
     source: str = "unknown"
 
-MSG = Belief | Ask | Objective 
+MSG = Belief | Ask | Objective | Plan
+
+_type_belief_set = {Belief, "belief" , "belf" ,"blf", "bel" , "b"}
+_type_objective_set = {Objective, "objective", "objtv", "obj", "ob", "o"}
+_type_plan_set = {Plan, "plan", "pln", "pl", "p"}
+_type_env_set = {Environment, "environment", "envrmnt", "env", "e"}
+_type_ch_set = {Channel, "channel", "chnnl", "ch", "c"}
+_data_types = {Belief,Objective,Ask,Plan}
 
 class Agent:
     def __init__(
@@ -184,12 +191,6 @@ class Agent:
     ):              
         self.stop_flag = None
         self.thread = None
-
-        self._type_belief_set = {Belief, "belief" , "belf" ,"blf", "bel" , "b"}
-        self._type_objective_set = {Objective, "objective", "objtv", "obj", "ob", "o"}
-        self._type_env_set = {Environment, "environment", "envrmnt", "env", "e"}
-        self._type_ch_set = {Channel, "channel", "chnnl", "ch", "c"}
-        self._data_types = {Belief,Objective,Ask,Plan}
         self.full_log = full_log
         
         self.my_name = name
@@ -205,13 +206,16 @@ class Agent:
         
         self.__default_channel = "comm"
         self.paused_agent = False
+        
+        try: 
+            self._plans
+        except AttributeError:
+            self._plans = []
+         
         self.print(f"Initialized") 
 
     def print(self,*args, **kwargs):
         return print(f"{self._name}>",*args,**kwargs)
-    
-    def test(self, a):
-        print(a)
     
     @staticmethod
     def plan(trigger, context=[]):
@@ -220,7 +224,20 @@ class Agent:
                 self.func = func
             
             def __set_name__(self, instance, name):
-                plan = Plan(trigger,context,self.func)
+                context_data = []
+                if type(context) is list:
+                    for ctxt in context:
+                        if ctxt[0] in _type_belief_set:
+                            context_data.append(Belief(*ctxt[1:]))
+                        elif ctxt[0] in _type_objective_set:
+                            context_data.append(Objective(*ctxt[1:]))
+                elif type(context) is tuple:
+                    if context[0] in _type_belief_set:
+                        context_data = [Belief(*context[1:])]
+                    elif context[0] in _type_objective_set:
+                        context_data = [Objective(*context[1:])]
+                    
+                plan = Plan(trigger,context_data,self.func)
                 try:
                     instance._plans += [plan]
                 except AttributeError:
@@ -308,12 +325,23 @@ class Agent:
     def has_close(
         self, 
         data_type: Belief | Objective | str,
-        key: str, 
+        key: str = "", 
         args: int | Any = None, 
         source: str = None
     ):
         if self.search(data_type, key, args, source) is not None:
             return True
+        
+        if type(data_type) in {Belief, Objective}:
+            key,args,source = (data_type.key,data_type.args,data_type.source)
+            data_type = type(data_type)
+        
+            if self.search(data_type, key, None, None) is not None:
+                return True
+            if self.search(data_type, key, args, None) is not None:
+                return True
+            if self.search(data_type, key, args, source) is not None:
+                return True
         return False 
 
     def has_objective(self, objective: Objective):
@@ -387,15 +415,15 @@ class Agent:
             self.print(f"{data_type} doesn't exist | purge({purge_source})")
       
     def search(
-        self, data_type: Belief | Objective | str, 
-        key: str, args: int | Any = None, 
+        self, data_type: Belief | Objective | Plan | str, 
+        key_trigger: str, args_context: int | Any = None, 
         source: str = None,
         all = False
-    ) -> Optional[Belief | Objective | List]:
+    ) -> Optional[Belief | Objective | Plan | List]:
         if all:
-            return self._central("search-all",data_type,key,args,source)
+            return self._central("search-all",data_type,key_trigger,args_context,source)
         else:    
-            return self._central("search",data_type,key,args,source)
+            return self._central("search",data_type,key_trigger,args_context,source)
                              
     def _searching(
         self,type_base: list,
@@ -454,27 +482,47 @@ class Agent:
         else:
             return None
 
+    def _searching_plan(self, trigger, context, all = False):
+        found_data = []
+        for plan in self._plans:
+            if plan.trigger == trigger:
+                if (len(plan.context) == context or plan.context == context)\
+                    or context is None:
+                    if all:
+                        found_data.append(plan)
+                    else:
+                        found_data = plan
+                        break
+        if found_data or all:
+            return found_data
+        else:
+            return None
+                          
+
     def _central(self,def_type,data_type,key,args,source):
         if type(data_type) is str:
             data_type = data_type.lower()
         elif type(data_type) is type:
             data_type = data_type.__name__.lower()
-        elif type(data_type) is Belief or type(data_type) is Objective:
+        elif type(data_type) in {Belief, Objective, Plan}:
             key,args,source = (data_type.key,data_type.args,data_type.source)
             data_type = type(data_type)
         else:
             self.print(f"Error in Central Typing for {type(data_type)}:{data_type}")
             return None
         
-        if data_type in self._type_belief_set:
+        if data_type in _type_belief_set:
             type_base = self.__beliefs
             data_type = Belief(key,args,source)
             
-        elif data_type in self._type_objective_set:
+        elif data_type in _type_objective_set:
             type_base = self.__objectives
             data_type = Objective(key,args,source)
+        
+        elif data_type in _type_plan_set:
+            def_type += "-plan"
 
-        elif type(data_type) not in {Belief,Objective}:
+        elif type(data_type) not in {Belief,Objective,Plan}:
             print("Error")
             return None
         
@@ -489,6 +537,10 @@ class Agent:
                 return self._searching(type_base,key,args,source)
             case "search-all":
                 return self._searching(type_base,key,args,source,True)
+            case "search-plan":
+                return self._searching_plan(key,args)
+            case "search-all-plan":
+                return self._searching_plan(key,args,True)
 
     def _run_plan(self, plan: Plan, trigger: Belief | Objective):
         # sleep(0.2)
@@ -524,23 +576,28 @@ class Agent:
                 self.rm(objective)
 
             case ("askOne", ask) if isinstance(ask, Ask):
-                found_belief = self.search(ask.belief)
+                key = ask.data_type.key
+                args_len = ask.data_type.args_len
+                found_belief = self.search(Belief,key,args_len)
                 self.send(ask.source, "tell", found_belief)
 
             case ("askAll", ask) if isinstance(ask, Ask):
-                found_beliefs = self.search(ask.belief, all=True)
+                key = ask.data_type.key
+                args_len = ask.data_type.args_len
+                found_beliefs = self.search(Belief,key,args_len,all=True)
                 for bel in found_beliefs:
                     self.send(ask.source, "tell", bel)
 
-            case ("tellHow", belief):
-                pass
+            case ("tellHow", plan) if isinstance(plan, Plan):
+                self.add_plan(plan)
 
-            case ("untellHow", belief):
-                pass
+            case ("untellHow", plan) if isinstance(plan, Plan):
+                self.rm_plan(plan)
 
-            case ("askHow", belief):
-                pass
-
+            case ("askHow", ask) if isinstance(ask, Ask):
+                found_plans = self.search(Plan,ask.data_type,all=True)
+                for plan in found_plans:
+                    self.send(ask.source, "tellHow", plan)
             case _:
                 TypeError(f"Unknown type of message {act}:{msg}")
 
@@ -551,33 +608,33 @@ class Agent:
             case "achieve" | "unachieve":
                 return Objective(*data)
     
-    def send(self, target: str | tuple, act: str, msg: MSG | Tuple, channel: str = None):            
-        if msg not in self._data_types:
+    def send(self, target: str | tuple, act: str, msg: MSG | Tuple | str, channel: str = None):            
+        if type(msg) not in _data_types:
             msg = self.as_data_type(act,msg)
   
         if channel is None:
             channel = self.__default_channel
-        msg = msg.update(source = self.my_name)
+        if type(msg) is not Plan:
+            msg = msg.update(source = self.my_name)
         match (act, msg):
-            case ("askOne" | "askAll", belief) if isinstance(belief, Belief):
-                msg = Ask(belief, source=self.my_name)
+            case ("askOne"|"askAll"|"askHow", data) if isinstance(data, (Belief,str)):
+                msg = Ask(data, source=self.my_name)
 
         self.print(f"Sending to {target} : {act} -> {msg}") if self.full_log else ...
         try:
             self._channels[channel]._send(self.my_name,target,act,msg)
         except KeyError:
             self.print(f"Not Connected to Selected Channel: {channel}")
-        #self.send_msg(target, act, msg, channel)
     
     def find_in(self, agent_name, cls_type=None, cls_name=["env","comm"], cls_instance=None):
         cls_type = cls_type.lower()
         try:
             if cls_instance:
                 return cls_instance.agent_list[agent_name]
-            if cls_type in self._type_env_set:
+            if cls_type in _type_env_set:
                 cls_name = cls_name[0] if type(cls_name) == list else cls_name  
                 return self._environments[cls_name][0].agent_list[agent_name]
-            if cls_type in self._type_ch_set:
+            if cls_type in _type_ch_set:
                 cls_name = cls_name[1] if type(cls_name) == list else cls_name  
                 return self._channels[cls_name].agent_list[agent_name]
         except KeyError as ke:
@@ -639,7 +696,7 @@ class Agent:
                     continue
             
             for context in plan.context:
-                if not self.has_close(*context):
+                if not self.has_close(context):
                     break
             else:        
                 return plan, trigger
