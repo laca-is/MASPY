@@ -9,7 +9,7 @@ class Sample(Agent):
     
     @Agent.plan("print")
     def Sample_plan(self, src):
-        self.print("Running Another Agent Plan")
+        self.print("Running Another Agent's Plan")
         self.stop_cycle()
     
     @Agent.plan("send_info",("blf","Sender"))
@@ -17,7 +17,7 @@ class Sample(Agent):
         agents_list = self.find_in("Sample","Channel")["Receiver"]
         self.print(self.search("b","Sender",(2,)))
         for agent in agents_list:
-            self.print(f"Sending> {agent}")
+            self.print(f"Sending> {msg} to {agent}")
             self.send(agent,"achieve",("receive_info",msg))
             
         agents_list = self.find_in("test","Channel")["Test"]
@@ -34,16 +34,16 @@ class Sample(Agent):
 
 class test(Agent):
     def __init__(self, name):
-        super().__init__(name,full_log=True)
+        super().__init__(name)
     
 
 if __name__ == "__main__":
     t = test("Test")
     t.add(Objective("print"))
-    sender = Sample("Sender",False)    
+    sender = Sample("Sender")    
     sender.add(Belief("Sender"))
     sender.add(Objective("send_info","Hello"))
-    receiver = Sample("Receiver",False)
+    receiver = Sample("Receiver")
     receiver.add(Belief("Receiver"))
     Handler().connect_to([sender,receiver,t],[Channel()])
     Handler().start_all_agents()

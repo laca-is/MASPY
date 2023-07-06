@@ -68,7 +68,7 @@ class Channel(metaclass=CommsMultiton):
 
     def _send(self, sender, target, act, msg):            
         try:
-            self._agents[target].recieve_msg(sender,act,msg)
+            self._agents[target].save_msg(sender,act,msg)
         except KeyError:
             self.print(f"Agent {target} not connected")
 
@@ -82,7 +82,7 @@ class Channel(metaclass=CommsMultiton):
                     msg[key] = value 
                 try:
                     self.print(f"> Sending a message {msg['self'].my_name}>{msg['target']}")
-                    self._agents[msg['target']].recieve_msg(msg['self']\
+                    self._agents[msg['target']].save_msg(msg['self']\
                                     .my_name,msg['act'],msg['msg'])
                 except(KeyError):
                     self.print(f"> Agent {msg['target']} not connected")

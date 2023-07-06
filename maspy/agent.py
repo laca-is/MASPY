@@ -191,6 +191,7 @@ class Agent:
     ):              
         self.stop_flag = None
         self.thread = None
+        self.saved_msgs = []
         self.full_log = full_log
         
         self.my_name = name
@@ -555,7 +556,10 @@ class Agent:
     def _stop_plan(self, plan):
         self.print(f"Stoping {plan})")  if self.full_log else ...
         pass
-
+    
+    def save_msg(self, sender, act, msg):
+        self.saved_msgs.append((sender,act,msg))
+        
     def recieve_msg(self, sender, act, msg: MSG):
         if not act == "env_tell":
             self.print(f"Received from {sender} : {act} -> {msg}")  if self.full_log else ...
@@ -664,7 +668,7 @@ class Agent:
     def cycle(self, stop_flag):
         while not stop_flag.is_set():            
             self._perception()
-            #self.mail() #TODO better organized way of checking messages
+            self._mail()
             chosen_plan, trigger = self._deliberation()
             #self.print(f"{chosen_plan}")
             if chosen_plan is not None:
@@ -680,6 +684,11 @@ class Agent:
             self.rm(Belief(None,None,env_name),purge_source=True)
             for key, value in perceived.items():
                 self.add(Belief(key,value,env_name))
+    
+    def _mail(self):
+        while self.saved_msgs:
+            sender,act,msg = self.saved_msgs.pop()
+            self.recieve_msg(sender,act,msg)
     
     def _deliberation(self):
         for plan in self._plans:
