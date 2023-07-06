@@ -1,10 +1,9 @@
 # MASPY_BDI - Multi-Agent System for Python
 
 Doing:
-  - Making examples
+  - Implementing small upgrades
   
 Todo:
-  - Implement all types of messages acts
   - Implement Descriptive Componet to Methods
   - Make better error managment
   - Look into a more robust reasoning cycle
@@ -13,6 +12,8 @@ Todo:
   - Introduce Machine Learning in Agent Reasoning
 
 Done:
+  - All types of messages acts implemented
+  - Plan decorator for simpler e explicit programming
   - Connections and Utilizations of Env and Channels Remade
   - Version 1.0 of the Reasoning Cycle
   - Beliefs, Objectives and Plans Managment Made Simpler
