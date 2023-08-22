@@ -8,7 +8,7 @@ class CommsMultiton(type):
     _instances: Dict[str, "Channel"] = {}
     _lock: Lock = Lock()
 
-    def __call__(cls, __my_name="comm"):
+    def __call__(cls, __my_name="default"):
         with cls._lock:
             if __my_name not in cls._instances:
                 instance = super().__call__(__my_name)
@@ -47,7 +47,7 @@ class Channel(metaclass=CommsMultiton):
             self.agent_list[type(agent).__name__] = {agent.my_name[0] : {agent.my_name}}
             self._agents[agent.my_name] = agent
         
-        self.print(f'> Connecting agent {type(agent).__name__}:{agent.my_name} to channel')
+        self.print(f'Connecting agent {type(agent).__name__}:{agent.my_name} to channel')
 
             
     def _rm_agents(self, agents):
@@ -63,11 +63,11 @@ class Channel(metaclass=CommsMultiton):
             del self._agents[agent.my_name]
             del self.agent_list[agent.my_name]
         self.print(
-            f"> Desconnecting agent {type(agent).__name__}:{agent.my_name} from channel"
+            f"Desconnecting agent {type(agent).__name__}:{agent.my_name} from channel"
         )
 
     def _send(self, sender, target, act, msg):            
-        try:
+        try:         
             self._agents[target].save_msg(sender,act,msg)
         except KeyError:
             self.print(f"Agent {target} not connected")
@@ -81,11 +81,11 @@ class Channel(metaclass=CommsMultiton):
                 for key,value in arg_values.items():
                     msg[key] = value 
                 try:
-                    self.print(f"> Sending a message {msg['self'].my_name}>{msg['target']}")
+                    self.print(f"Sending a message {msg['self'].my_name}>{msg['target']}")
                     self._agents[msg['target']].save_msg(msg['self']\
                                     .my_name,msg['act'],msg['msg'])
                 except(KeyError):
-                    self.print(f"> Agent {msg['target']} not connected")
+                    self.print(f"Agent {msg['target']} not connected")
 
                 return func(*args, **kwargs)
             

@@ -22,7 +22,7 @@ class Handler(metaclass=HandlerMeta):
     def __init__(self, ctrl_name="Crdnt") -> None:
         signal.signal(signal.SIGINT, self.stop_all_agents)
         self._my_name = ctrl_name
-        self._name = f"{type(self).__name__}:{self._my_name}"
+        self._name = f"{type(self).__name__}"
         self._started_agents: List["Agent"] = []
         self._agent_list: Dict[str, str] = {}
         self._agents: Dict[str, "Agent"] = {}

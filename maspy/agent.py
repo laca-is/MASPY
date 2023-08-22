@@ -205,7 +205,8 @@ class Agent:
         self.__old_beliefs = self._clean(beliefs)
         self.__objectives = self._clean(objectives)
         
-        self.__default_channel = "comm"
+        self.__default_channel = Channel()._my_name
+        self.connect_to(Channel())
         self.paused_agent = False
         
         try: 
@@ -628,7 +629,7 @@ class Agent:
         try:
             self._channels[channel]._send(self.my_name,target,act,msg)
         except KeyError:
-            self.print(f"Not Connected to Selected Channel: {channel}")
+            self.print(f"Not Connected to Selected Channel:{channel._my_name}")
     
     def find_in(self, agent_name, cls_type=None, cls_name=["env","comm"], cls_instance=None):
         cls_type = cls_type.lower()
