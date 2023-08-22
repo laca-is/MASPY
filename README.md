@@ -1,17 +1,17 @@
 # MASPY
 
-*MASPY* is a `Python` framework which aims to ease the development of a 
-MultiAgent System based on the BDI paradigm. With this paradigm, an agent
-will contain *Beliefs*, the state it believes it is true, *Desire*, and
-*Intentions*. 
+*MASPY* is a `Python` library which aims to ease the development of a 
+Multi-Agent Systems based on the BDI paradigm. In this paradigm, an agent
+will contain *Beliefs*, its knowledge, *Desire*, its wants, and
+*Intentions*, how it will achieve their wants. 
 
 *MASPY* creates an abstraction layer to model the agents and the environment
 where the agents will act. An agent may contain any number of *Beliefs*, 
 *Objectives*, *Plans*, these to classes model desires and intentions, 
 respectively. The agent can comunicate with others agents, by sending
-or requesting any of the previous entitys. This framework
+or requesting any of the previous entitys. This library
 uses a Knowledge Query Model Language to model the communication between agents
-using acts of speech as a base model, in this way an agent can ask, tell,
+using acts of speech, or perfomatives, as a base model, in this way an agent can ask, tell,
 command or teach anything it needs and knows.
 
 ## Using the framework
