@@ -48,6 +48,7 @@ The agent can also start with some inital *Beliefs* or *Objectives*.
 
 ```python
 from maspy.agent import Agent, Belief, Objective
+
 class AgentWithInitalStates(Agent):
     # the caller will provide beliefs and objectives
     def __init__(self, name, beliefs, objectives):
@@ -68,6 +69,7 @@ a context needed to be true to execute the plan.
 
 ```python
 from maspy.agent import Agent
+
 class AgentWithPlans(Agent):
     def __init__(self, name):
         super().__init__(name)
