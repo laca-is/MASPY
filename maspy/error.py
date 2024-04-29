@@ -7,5 +7,8 @@ class InvalidObjectiveError(TypeError):
 class InvalidBeliefError(TypeError):
     pass
 
+class InvalidPerceptError(TypeError):
+    pass
+
 class RunPlanError(RuntimeWarning):
     pass

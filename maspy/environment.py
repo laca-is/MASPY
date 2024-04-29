@@ -1,5 +1,26 @@
 from threading import Lock
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Optional, Set, List
+from dataclasses import dataclass, field
+from collections.abc import Iterable
+from maspy.utils import utils
+from maspy.error import InvalidPerceptError
+
+DEFAULT_GROUP = "default"
+
+@dataclass
+class Percept:
+    key: str
+    args: tuple = field(default_factory=tuple)
+    group: str = DEFAULT_GROUP # Percept Type (still unsure)
+    
+    def __hash__(self) -> int:
+        args_hashable = []
+        for arg in self.args:
+            args_hashable.append(arg)
+
+        args_hashable = tuple(args_hashable)
+
+        return hash((self.key, args_hashable, self.group))
 
 class EnvironmentMultiton(type):
     _instances: Dict[str, "Environment"] = {}
@@ -19,20 +40,27 @@ class Environment(metaclass=EnvironmentMultiton):
         self.agent_list = {}
         self._agents = {}
         self._name = f"Environment:{self._my_name}"
-        self._facts: Dict[str, Any] = {"any": {}}
-        self._roles = {"any"}
+        self._percepts = dict()
     
     def print(self,*args, **kwargs):
         return print(f"{self._name}>",*args,**kwargs)
     
-    def perception(self,role):
-        return self._get_facts(role)
-    
+    def perception(self):
+        return self._percepts
+
+    @property
+    def print_percepts(self):
+        percepts = ""
+        for group_keys in self._percepts.values():
+            for percept_set in group_keys.values():
+                for percept in percept_set:
+                    percepts += f"{percept}\n"
+        print(f"{percepts}\r")
+        
     def add_agents(self, agents):
         try:
             for agent in agents:
                 self._add_agent(agent)
-            #self.send_agents_list()
         except TypeError:
             self._add_agent(agents)
     
@@ -48,106 +76,68 @@ class Environment(metaclass=EnvironmentMultiton):
             self.agent_list[type(agent).__name__] = {agent.my_name[0] : {agent.my_name}}
             self._agents[agent.my_name] = agent
         
-        self.print(f'> Connecting agent {type(agent).__name__}:{agent.my_name} to channel')
+        self.print(f'Connecting agent {type(agent).__name__}:{agent.my_name}')
     
-    def _add_role(self, role_name: str):
-        if type(role_name) == str:
-            self._roles.add(role_name)
-        else:
-            self.print(f"role *{role_name}* is not a string")
-
-    def _rm_role(self, role_name: str):
-        self._roles.remove(role_name)
-
-    def _get_roles(self) -> Set[str]:
-        return self._roles
-    
-    def _check_role(self, role: str) -> bool:
-        return role in self._roles
-    
-    def get_fact_value(self, name: str, role="any"):
-        try:
-            return self._facts[role][name]
-        except KeyError:
-            return None
-    
-    def create_fact(self, name: str, data: Any, role="any"):
-        if role != "any":
-            if role not in self._roles:
-                self._add_role(role)
-
-        if role in self._facts:
-            if name not in self._facts[role]:
-                self._facts[role].update({name : data})
-            else:
-                self.print(f"> Fact *{name}:{role}* already created")
-        else:
-            self._facts[role] = {name: data}
-        self.print(f"Creating fact {role}:{name}:{data}") if self.full_log else ...
-
-    def update_fact(self, name: str, data: Any, role="any"):
-        if self._fact_exists(name, role):
-            self.print(f"Updating fact {role}:{name}:[{self._facts[role][name]} > ",end="") if self.full_log else ...
-            self._facts[role] = {name: data}
-            print(f"{self._facts[role][name]}]") if self.full_log else ...
+    def create_percept(self, 
+            key: str = None, 
+            args: Optional[Any] = tuple(), 
+            group: Optional[str] = DEFAULT_GROUP,
+            percept: Optional[Iterable[Percept] | Percept] = None
+        ):
+        if key is None and percept is None:
+            raise Exception
+        
+        if key and not percept: 
+            if type(args) is not tuple: args = (args,) 
+            percept_dict = self._clean(Percept(key, args, group))
+        
+        if percept: 
+            percept_dict = self._clean(percept)
             
-    def _extend_fact(self, name: str, data: str, role="any"):
-        if not self._fact_exists(name, role):
-            return
-        try:
-            self.print(f"Extending fact {role}:{name}[{self._facts[role][name]} > ",end="") if self.full_log else ...
-            match self._facts[role][name]:
-                case list() | tuple():
-                    self._facts[role][name].append(data)
-                case dict() | set():
-                    self._facts[role][name].update(data)
-                case int() | float() | str():
-                    self.print(f"Impossible to extend fact {name}:{type(data)}")
-            print(f"{self._facts[role][name]}]") if self.full_log else ...
-        except (TypeError, ValueError):
-            self.print(f"Fact {name}:{type(self._facts[role][name])} can't extend {type(data)}")
+        self._percepts = utils.merge_dicts(self._percepts,percept_dict)
+        self.print(f"Creating percept {percept_dict}") if self.full_log else ...
 
-    def _reduce_fact(self, name, data, role="any"):
-        if not self._fact_exists(name, role):
-            return
-        try:
-            match self._facts[role][name]:
-                case list() | set():
-                    self._facts[role][name].remove(data)
-                case dict():
-                    self._facts[role][name].pop(data)
-                case tuple():
-                    old_tuple = self._facts[role][name]
-                    self._facts[role][name] = tuple(x for x in old_tuple if x != data)
-                case int() | float() | str():
-                    self.print(f"> Impossible to reduce fact {name}:{type(data)}")
-        except (KeyError, ValueError):
-            self.print(f"> Fact {name}:{type(self._facts[role][name])} doesn't contain {data}")
+    def change_percept(self, key: str, old_args: Any = tuple(), new_args: Any = tuple(), group: Optional[str] = DEFAULT_GROUP):
+        if type(old_args) is not tuple: old_args = (old_args,) 
+        if type(new_args) is not tuple: new_args = (new_args,) 
+        for percept in self._percepts[group][key]:
+            if percept == Percept(key,old_args,group): 
+                self.print(f"Updating {percept} to", end="")
+                percept.args = new_args
+                print(f" {percept}") 
+                break   
+            
+    def _percept_exists(self, key, args, group=DEFAULT_GROUP) -> bool:
+        if type(args) is not tuple: args = (args,)
+        return Percept(key,args,group) in self._percepts[group][key]
 
-    def _fact_exists(self, name: str, role: str) -> bool:
-        try:
-            self._facts[role][name]
-        except KeyError:
-            self.print(f"> Fact {name}:{role} doesn't exist")
-            return False
-        return True
+    def delete_percept(self, 
+            key: str, 
+            args: Optional[Any] = tuple(), 
+            group: Optional[str] = DEFAULT_GROUP,
+        ):
+        if type(args) is not tuple: args = (args,) 
+        self._percepts[group][key].remove(Percept(key,args,group))
+              
+    def _clean(
+        self, percept_data: Iterable[Percept] | Percept
+    ) -> Dict:
+        match percept_data:
+            case None:
+                return dict()
+            case Percept():
+                return {self._my_name : {percept_data.key: {percept_data}}}
+            case Iterable():
+                percept_dict = dict()
+                for prc_dt in percept_data:
+                    if prc_dt.key in percept_dict[self._my_name]:
+                        percept_dict[prc_dt.group][prc_dt.key].add(prc_dt)
+                    else:
+                        percept_dict[prc_dt.group].update({prc_dt.key: {prc_dt}})
 
-    def _rm_fact(
-        self, del_name: str, del_data: Any = None, del_role: Optional[str] = None
-    ):
-        if del_role is None:
-            for role in self._roles:
-                if del_name in self._facts[role].keys():
-                    if del_data is None:
-                        del self._facts[role][del_name]
-                    elif del_data in self._facts[role][del_name].keys():
-                        del self._facts[role][del_name][del_data]
-
-    def _get_facts(self, agent_role: Optional[str] = None):
-        found_facts = {}
-        for role in self._roles:
-            if role == agent_role or role == "any" or agent_role == "all":
-                for fact in self._facts[role]:
-                    found_facts[fact] = self._facts[role][fact]
-        return found_facts
+                return percept_dict
+            case _:
+                raise TypeError(
+                    f"Expected data type to have be Iterable[Percept] | Percept, recieved {type(percept_data).__name__}"
+                ) 
 
