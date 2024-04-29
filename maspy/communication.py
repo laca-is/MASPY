@@ -1,8 +1,23 @@
-import inspect
-import random
 from threading import Lock
-from functools import wraps
-from typing import List, Optional, Union, Dict, Set, Tuple, Any
+from collections.abc import Iterable
+from typing import Dict, TypeVar
+
+Agt_name = TypeVar('Agt_name')
+Agt_cls = TypeVar('Agt_cls')
+Agt_inst = TypeVar('Agt_inst')
+Agt_fullname = TypeVar('Agt_fullname')
+
+tell= TypeVar('tell')
+untell = TypeVar('untell')
+tellHow = TypeVar('tellHow')
+untellHow = TypeVar('untellHow')
+achieve = TypeVar('achieve')
+unachieve = TypeVar('unachieve')
+askOne = TypeVar('askOne')
+askAll = TypeVar('askAll')
+askHow = TypeVar('askHow')
+
+broadcast = TypeVar('broadcast')
 
 class CommsMultiton(type):
     _instances: Dict[str, "Channel"] = {}
@@ -17,12 +32,14 @@ class CommsMultiton(type):
 
 
 class Channel(metaclass=CommsMultiton):
-    def __init__(self, env_name) -> None:
-        self._my_name = env_name
-        self.agent_list = {}
-        self._agents = {}
+    def __init__(self, comm_name) -> None:
+        from maspy.agent import Belief, Goal, Ask, Plan
+        self.data_types = {Belief,Goal,Ask,Plan}
+        self._my_name = comm_name
+        self.agent_list: Dict[Agt_cls, Dict[Agt_name, Agt_fullname]] = {}
+        self._agents: Dict[Agt_fullname, Agt_inst] = {}
         self._name = f"{type(self).__name__}:{self._my_name}"
-        #Agent.send_msg = self.function_call(Agent.send_msg)
+        self.full_log = True
         
     def print(self,*args, **kwargs):
         return print(f"{self._name}>",*args,**kwargs)
@@ -31,7 +48,6 @@ class Channel(metaclass=CommsMultiton):
         try:
             for agent in agents:
                 self._add_agent(agent)
-            #self.send_agents_list()
         except TypeError:
             self._add_agent(agents)
 
@@ -47,7 +63,7 @@ class Channel(metaclass=CommsMultiton):
             self.agent_list[type(agent).__name__] = {agent.my_name[0] : {agent.my_name}}
             self._agents[agent.my_name] = agent
         
-        self.print(f'Connecting agent {type(agent).__name__}:{agent.my_name} to channel')
+        self.print(f'Connecting agent {type(agent).__name__}:{agent.my_name}')
 
             
     def _rm_agents(self, agents):
@@ -56,39 +72,47 @@ class Channel(metaclass=CommsMultiton):
                 self._rm_agent(agent)
         except TypeError:
             self._rm_agent(agents)
-        #self.send_agents_list()
 
     def _rm_agent(self, agent):
         if agent.my_name in self._agents:
             del self._agents[agent.my_name]
-            del self.agent_list[agent.my_name]
+            del self.agent_list[type(agent).__name__][agent.my_name[0]]
         self.print(
-            f"Desconnecting agent {type(agent).__name__}:{agent.my_name} from channel"
+            f"Desconnecting agent {type(agent).__name__}:{agent.my_name}"
         )
 
-    def _send(self, sender, target, act, msg):            
+    def _send(self, sender, target, act, message):  
+        if type(act) == TypeVar: act = act.__name__ 
+        
+        messages = []
+        if type(message) == Iterable:
+            for m in message:
+                messages.append(self.parse_sent_msg(sender,act,m))
+        else:
+            messages.append(self.parse_sent_msg(sender,act,message))
+
+        for msg in messages:
+            if type(target) == Iterable:
+                for trgt in target:
+                    self._sending(sender,trgt,act,msg)
+            elif target == broadcast:
+                for agent_name in self._agents.keys():
+                    self._sending(sender,agent_name,act,msg)
+            else:
+                self._sending(sender,target,act,msg)
+    
+    def _sending(self, sender, target, act, msg):
+        self.print(f"{sender} sending {act}:{msg} to {target}") if self.full_log else ...        
+    
         try:         
-            self._agents[target].save_msg(sender,act,msg)
+            self._agents[target].save_msg(act,msg)
         except KeyError:
             self.print(f"Agent {target} not connected")
-
-    def function_call(self, func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if args[-1] == self._my_name or args[-1] == 'broadcast':
-                arg_values = inspect.getcallargs(func, *args, **kwargs)
-                msg = {}
-                for key,value in arg_values.items():
-                    msg[key] = value 
-                try:
-                    self.print(f"Sending a message {msg['self'].my_name}>{msg['target']}")
-                    self._agents[msg['target']].save_msg(msg['self']\
-                                    .my_name,msg['act'],msg['msg'])
-                except(KeyError):
-                    self.print(f"Agent {msg['target']} not connected")
-
-                return func(*args, **kwargs)
-            
-        return wrapper
-
-        return wrapper
+    
+    def parse_sent_msg(self,sender, act, msg):
+        from maspy.agent import Belief, Goal, Ask, Plan
+        if type(msg) in {Belief, Goal} and msg is not None:
+            msg = msg.update(source=sender)
+        if act in {"askOne","askAll","askHow"}:
+            msg = Ask(msg, source=sender)
+        return msg
