@@ -23,26 +23,29 @@ To install [MASPY](https://pypi.org/project/maspy-ml/) you can use package-manag
 The minimum version of `Python` guarateed to work is 3.10, altough earlier 
 versions may work.
 
+## Using MASPY
 
-## Examples
+### Import
+
+To use the library you need this simple import  ```from maspy import *``` , nothing more or less.
+Everything for ``MASPY`` to run correctly in imported this way.
 
 ### Creating a new Agent
-To create a new agent, it is only needed to extend an `Agent` base class,
+
+To create a new agent, you only need to extend `Agent` in your class,
 this add all of the necessary logic to execute an agent. the following
 snippet shows how to create an `DummyAgent`.
 
 #### Dummy Agent
 
 ```python
-from maspy.agent import Agent
+from maspy import *
 
 class DummyAgent(Agent):
     def __init__(self, agent_name):
         super().__init__(agent_name)
 
-if __name__ == "__main__":
-    my_agent = DummyAgent("Dummy")
-
+my_agent = DummyAgent("Dummy")
 ```
 #### Initial Beliefs and Objectives
 The agent can also start with some inital *Beliefs* or *Objectives*.
