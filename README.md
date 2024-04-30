@@ -63,36 +63,33 @@ class DummyAgent(Agent):
         # You may also add some hardcoded beliefs and goals
         self.add(Belief("Box",(5,10)))
 
-# the beliefs/goals may be any iterable collection or a single
-# entity directly 
+# the beliefs/goals may be any iterable collection or a single entity 
 agent_1 = DummyAgent("Dummy_1", [Belief("my_pos",(0,0)),Belief("target_pos",(7,7))], Goal("move_boxes"))
 agent_2 = DummyAgent("Dummy_2", [Belief("my_pos",(3,3)),Belief("target_pos",(3,3))], Goal("move_boxes"))
 
 ```
 #### Defining plans
-To define plans it is also really simple, it only needs the `Agent.plan` 
-decoration. This decoration must contain the *plan* name, and optionally
+To define plans it is also really simple, it only needs the `@pl` decoration. 
+This decoration must contain the *plan* change, the information that changed and optionally
 a context needed to be true to execute the plan.
 
 ```python
-from maspy.agent import Agent
+from maspy import *
 
-class AgentWithPlans(Agent):
-    def __init__(self, name):
-        super().__init__(name)
-    
-    @Agent.plan("plan_name")
-    # always execute this plan whenever Objective("plan_name") exists
-    # every plan needs at least 2 arguments, self and src.
-    def some_plan(self, src):
-        # do something you would in a ordinary python function
+class DummyAgent(Agent):
+    def __init__(self, agent_name, beliefs, goals):
+        super().__init__(agent_name, beliefs, goals)
+        self.add(Belief("Box",(5,10)))
+
+    # always execute this plan whenever the agent aquires the goal to "move_boxes".
+    # this plan also needs the agent to believe a "Box" is at some coordinate (X,Y)
+    # every plan needs at least self and src, plus the arguments from the chosen context
+    @pl(gain,Goal("move_boxes"),Belief("Box",(X,Y))
+    def some_plan(self, src, X, Y):
         ...
 
-    @Agent.plan("plan_name2", (Belief("foo")))
-    # only execute this plan if the agent has Belief("foo")
-    def some_plan(self, src):
-        # do something you would in a ordinary python function
-        ...
+agent_1 = DummyAgent("Dummy_1", [Belief("my_pos",(0,0)),Belief("target_pos",(7,7))], Goal("move_boxes"))
+agent_2 = DummyAgent("Dummy_2", [Belief("my_pos",(3,3)),Belief("target_pos",(3,3))], Goal("move_boxes"))
 ```
 
 ### Running the agents
