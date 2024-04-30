@@ -109,10 +109,10 @@ agent.start()
 This code will generate the following prints:
 
     Starting MASPY Program
-    # Admin #> Registering Agent HelloAgent:('HelloAgent', 1)     
+    # Admin #> Registering Agent HelloAgent:('HelloAgent', 1)
     Channel:default> Connecting agent HelloAgent:('HelloAgent', 1)
     # Admin #> Starting Agents
-    Hello World
+    Agent:('HelloAgent', 1)> Hello World
 
 ### Running the agents
 Running the system is simple, given the utilities support we have in place.
