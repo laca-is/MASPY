@@ -34,8 +34,10 @@ Everything for ``MASPY`` to run correctly in imported this way.
 ### Creating a new Agent
 
 To create a new agent, you only need to extend `Agent` in your class,
-this add all of the necessary logic to execute an agent. the following
-snippet shows how to create an `DummyAgent`.
+this adds all of the necessary logic to execute an agent. the following
+snippet shows how to create an `DummyAgent`. 
+
+To create an instance of any agent, only their name is needed.
 
 #### Dummy Agent
 
@@ -48,24 +50,24 @@ class DummyAgent(Agent):
 
 my_agent = DummyAgent("Dummy")
 ```
+
 #### Initial Beliefs and Objectives
-The agent can also start with some inital *Beliefs* or *Objectives*.
+The agent can also start with some inital *Beliefs* or *Goals*.
 
 ```python
-from maspy.agent import Agent, Belief, Objective
+from maspy import *
 
-class AgentWithInitalStates(Agent):
-    # the caller will provide beliefs and objectives
-    def __init__(self, name, beliefs, objectives):
-        super().__init__(name, beliefs, objectives)
-        # You may also add some hardcoded beliefs and objectives
-        self.add(Objective("some_objective"))
-        self.add(Belief("some Belief"))
+class DummyAgent(Agent):
+    def __init__(self, agent_name, beliefs, goals):
+        super().__init__(agent_name, beliefs, goals)
+        # You may also add some hardcoded beliefs and goals
+        self.add(Belief("Box",(5,10)))
 
-if __name__ == "__main__":
-    # the beliefs/objectives may be any iterable collection or a single
-    # entity directly 
-    my_agent = AgentWithInitialStates("SomeAgent" [Belief("b")], Objective("o"))
+# the beliefs/goals may be any iterable collection or a single
+# entity directly 
+agent_1 = DummyAgent("Dummy_1", [Belief("my_pos",(0,0)),Belief("target_pos",(7,7))], Goal("move_boxes"))
+agent_2 = DummyAgent("Dummy_2", [Belief("my_pos",(3,3)),Belief("target_pos",(3,3))], Goal("move_boxes"))
+
 ```
 #### Defining plans
 To define plans it is also really simple, it only needs the `Agent.plan` 
