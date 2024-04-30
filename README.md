@@ -16,7 +16,7 @@ command or teach anything it needs and knows.
 
 ## Install
 
-To install `MASPY` you can use package-management system `pip`: 
+To install [MASPY](https://pypi.org/project/maspy-ml/) you can use package-management system `pip`: 
 
         `pip install maspy-ml` 
 
