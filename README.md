@@ -14,10 +14,11 @@ uses a Knowledge Query Model Language to model the communication between agents
 using acts of speech, or perfomatives, as a base model, in this way an agent can ask, tell,
 command or teach anything it needs and knows.
 
-## Using the library
-This project still in its infancy and there isn't a `pip` package to use the 
-`MASPY` as a dependecy. Right now to use the project, clone the repository
-and manually import as a `Python` module. 
+## Install
+
+To install `MASPY` you can use package-management system `pip`: 
+
+`pip install maspy-ml` 
 
 The minimum version of `Python` guarateed to work is 3.10, altough earlier 
 versions may work.
