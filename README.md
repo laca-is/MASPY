@@ -17,8 +17,8 @@ command or teach anything it needs and knows.
 ## Install
 
 To install `MASPY` you can use package-management system `pip`: 
-
-`pip install maspy-ml` 
+##
+        `pip install maspy-ml` 
 
 The minimum version of `Python` guarateed to work is 3.10, altough earlier 
 versions may work.
