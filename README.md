@@ -92,6 +92,28 @@ agent_1 = DummyAgent("Dummy_1", [Belief("my_pos",(0,0)),Belief("target_pos",(7,7
 agent_2 = DummyAgent("Dummy_2", [Belief("my_pos",(3,3)),Belief("target_pos",(3,3))], Goal("move_boxes"))
 ```
 
+#### Simplest Possible Agent w/ a Plan
+```python
+from maspy import *
+
+class HelloAgent(Agent):
+    @pl(gain,Belief("hello"))
+    def func(self,src):
+        print("Hello World")
+
+agent = HelloAgent()
+agent.add(Belief("hello"))
+agent.start()
+```
+
+This code will generate the following prints:
+
+    Starting MASPY Program
+    # Admin #> Registering Agent HelloAgent:('HelloAgent', 1)     
+    Channel:default> Connecting agent HelloAgent:('HelloAgent', 1)
+    # Admin #> Starting Agents
+    Hello World
+
 ### Running the agents
 Running the system is simple, given the utilities support we have in place.
 The `Handler` module contains a few usefull methods to start and manage the 
