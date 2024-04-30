@@ -65,7 +65,6 @@ class DummyAgent(Agent):
 
 # the beliefs/goals may be any iterable collection or a single entity 
 agent_1 = DummyAgent("Dummy_1", [Belief("my_pos",(0,0)),Belief("target_pos",(7,7))], Goal("move_boxes"))
-agent_2 = DummyAgent("Dummy_2", [Belief("my_pos",(3,3)),Belief("target_pos",(3,3))], Goal("move_boxes"))
 
 ```
 #### Defining plans
@@ -92,28 +91,6 @@ agent_1 = DummyAgent("Dummy_1", [Belief("my_pos",(0,0)),Belief("target_pos",(7,7
 agent_2 = DummyAgent("Dummy_2", [Belief("my_pos",(3,3)),Belief("target_pos",(3,3))], Goal("move_boxes"))
 ```
 
-#### Simplest Possible Agent w/ a Plan
-```python
-from maspy import *
-
-class HelloAgent(Agent):
-    @pl(gain,Belief("hello"))
-    def func(self,src):
-        print("Hello World")
-
-agent = HelloAgent()
-agent.add(Belief("hello"))
-agent.start()
-```
-
-This code will generate the following prints:
-
-    Starting MASPY Program
-    # Admin #> Registering Agent HelloAgent:('HelloAgent', 1)
-    Channel:default> Connecting agent HelloAgent:('HelloAgent', 1)
-    # Admin #> Starting Agents
-    Agent:('HelloAgent', 1)> Hello World
-
 ### Running the agents
 Running the system is simple, given the utilities support we have in place.
 The `Handler` module contains a few usefull methods to start and manage the 
@@ -125,7 +102,7 @@ In case you only need to start all agents, the following snippet is enough.
 ag1 = DummyAgent("foo")
 ag2 = DummyAgent("bar")
 
-Handler().start_all_agents()
+Admin().start_system()
 ```
 
 #### Starting some agents
@@ -186,6 +163,34 @@ Handler().start_all_agents()
 ag.execute_in("my_env").env_action(ag)
 ```
 
+#### Simplest Possible Agent w/ a Plan
+```python
+from maspy import *
+
+class HelloAgent(Agent):
+    @pl(gain,Belief("hello"))
+    def func(self,src):
+        self.print("Hello World")
+        self.stop_cycle()
+
+agent = HelloAgent()
+agent.add(Belief("hello"))
+Admin().start_system()
+```
+
+This code will generate the following prints:
+
+    Starting MASPY Program
+    # Admin #> Registering Agent HelloAgent:('HelloAgent', 1)
+    Channel:default> Connecting agent HelloAgent:('HelloAgent', 1)
+    # Admin #> Starting Agents
+    Agent:('HelloAgent', 1)> Hello World
+    Agent:('HelloAgent', 1)> Shutting Down...
+    Ending MASPY Program
+
+Notice that the agent is manually stoped with ```self.stop_cycle()```. 
+Otherwise the system would continue running indeterminately.
+
 ## Rough edges
 The project still has some rough edges that should be considered. 
 
@@ -194,7 +199,6 @@ in the future.
 - There is no support to run a `MASPY`` system in a distributed setting.
 - The system performance still unmeasured, altough running a toy system 
 with over thousands of agents was possible.
-
 
 ## Papers published
 
