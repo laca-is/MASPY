@@ -84,7 +84,7 @@ class DummyAgent(Agent):
     # always execute this plan whenever the agent aquires the goal to "move_boxes".
     # this plan also needs the agent to believe a "Box" is at some coordinate (X,Y)
     # every plan needs at least self and src, plus the arguments from the chosen context
-    @pl(gain,Goal("move_boxes"),Belief("Box",(X,Y))
+    @pl(gain,Goal("move_boxes"),Belief("Box",('X','Y'))
     def some_plan(self, src, X, Y):
         ...
 
