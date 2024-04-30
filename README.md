@@ -28,6 +28,7 @@ versions may work.
 ### Import
 
 To use the library you need this simple import  ```from maspy import *``` , nothing more or less.
+
 Everything for ``MASPY`` to run correctly in imported this way.
 
 ### Creating a new Agent
