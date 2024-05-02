@@ -253,14 +253,27 @@ class Park(Environment):
 
 #### Allowing agents to interact with an environment
 ```python
-ag = DummyAgent("dummy")
-env = MyEnv()
-# connect the agent to the environment
-ag.connect_to(env)
+from maspy import *
 
-Handler().start_all_agents()
-# execute environment action
-ag.execute_in("my_env").env_action(ag)
+class Park(Environment):
+    def __init__(self, env_name=None):
+        super().__init__(env_name)
+        self.create(Percept("spot",(1,"free"),adds_event=False))
+
+    def park_spot(self, driver, spot_id):
+        spot = self.get(Percept("spot",(spot_id,"free")))
+        if spot:
+            self.change(spot,(spot_id,driver))
+
+class Driver(Agent)
+    @pl(gain,Goal("park",("Park_Name","SpotID")))
+    def park_on_spot(self,src,park_name,spot_id):
+        # This agent functions makes the connection with an environment or channel
+        # Just give it Channel(Name) or Envrionment(Name) to add it to the agent 
+        self.connect_to(Environment(park_name))
+
+        # After the connection, the agent can make an action with a Park function
+        self.action(park_name).park_spot(self.my_name,spot_id)
 ```
 
 #### Simplest Possible Agent w/ a Plan
@@ -281,9 +294,6 @@ Admin().start_system()
 This code will generate the following prints:
 
     Starting MASPY Program
-    # Admin #> Registering Agent HelloAgent:('HelloAgent', 1)
-    Channel:default> Connecting agent HelloAgent:('HelloAgent', 1)
-    # Admin #> Starting Agents
     Agent:('HelloAgent', 1)> Hello World
     Agent:('HelloAgent', 1)> Shutting Down...
     Ending MASPY Program
