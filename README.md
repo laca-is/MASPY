@@ -37,7 +37,9 @@ To create a new agent, you only need to extend `Agent` in your class,
 this adds all of the necessary logic to execute an agent. the following
 snippet shows how to create an `DummyAgent`. 
 
-To create an instance of any agent, only their name is needed.
+To create an instance of any agent, only the Extension is needed.
+
+Technically, this is a MASPY Agent:
 
 #### Dummy Agent
 
@@ -45,28 +47,73 @@ To create an instance of any agent, only their name is needed.
 from maspy import *
 
 class DummyAgent(Agent):
-    def __init__(self, agent_name):
-        super().__init__(agent_name)
+    pass
 
-my_agent = DummyAgent("Dummy")
+my_agent = DummyAgent()
+named_agent = DummyAgent("Ag")
 ```
 
-#### Initial Beliefs and Objectives
-The agent can also start with some inital *Beliefs* or *Goals*.
+When the snippet above is run, this is the printed result:
+    
+    Starting MASPY Program
+    # Admin #> Registering Agent DummyAgent:('DummyAgent', 1)
+    Channel:default> Connecting agent DummyAgent:('DummyAgent', 1)
+    # Admin #> Registering Agent DummyAgent:('Ag', 1)
+    Channel:default> Connecting agent DummyAgent:('Ag', 1)
+
+It will execute indeterminably, while doing nothing.
+
+#### Initial Beliefs and Goals
+The agent can start with some inital *Beliefs* or *Goals*.
 
 ```python
 from maspy import *
 
-class DummyAgent(Agent):
-    def __init__(self, agent_name, beliefs, goals):
-        super().__init__(agent_name, beliefs, goals)
-        # You may also add some hardcoded beliefs and goals
-        self.add(Belief("Box",(5,10)))
+class Driver(Agent):
+    def __init__(self, agent_name=None):
+        super().__init__(agent_name)
+        self.add(Belief("budget",(rnd.randint(6,10),rnd.randint(12,20)),adds_event=False))
+        self.add(Goal("park"))
 
-# the beliefs/goals may be any iterable collection or a single entity 
-agent_1 = DummyAgent("Dummy_1", [Belief("my_pos",(0,0)),Belief("target_pos",(7,7))], Goal("move_boxes"))
-
+driver = Driver("Drv")
 ```
+
+#### Managing Beliefs and Goals
+Here are some info about *Beliefs* and *Goals* being created and removed.
+
+- This function adds a *goal* to the agent;
+- The first field represents the *goal* key and must always be a string;
+- The second field represents arguments of the *goal* and will always be a tuple;
+    + Each argument can have any structure, with each position of the tuple representing a different one;
+- The third field represents the *goal* source. It is "self" by default, or another agent.
+- adding or removing a *goal* always creates an event for agent, which will try to find a applicable plan.
+
+```python
+agent = DummyAgent("Ag")
+agent.add( Goal(key, args, source) )
+agent.rm( Goal(key, args, source) )
+
+agent.add( Goal("check_house", {"Area": [50,100], "Rooms": 5}, ("Seller",27) ) )
+agent.add( Goal("SendInfo", ("Information",["List","of","Information",42]) ) )
+agent.rm( Goal("walk", source=("trainer",2)) )
+```
+
+- This function adds a *belief* to the agent;
+- The first an second field work exaclty the same way as the *goal*'s
+- The third field represents the *belief* source. It is "self" by default, another agent or an environment.
+- The fourth field dictates if the adding or removing the belief will generate a new event.
+    + By default it does, but sometimes one does not want a group of beliefs to be considerend new events 
+
+```python
+agent = DummyAgent("Ag")
+agent.add( Belief(Key, Args, Source, Adds_Event) )
+agent.rm( Belief(Key, Args, Source, Adds_Event) )
+
+agent.add( Belief("Dirt", (("remaining",3),[(2,2),(3,7),(5,1)])) )
+agent.rm( Belief("spot",("A",4,"free"),"Parking",False) )
+agent.add( Belief("velocity",57) )
+```
+
 #### Defining plans
 To define plans it is also really simple, it only needs the `@pl` decoration. 
 This decoration must contain the *plan* change, the information that changed and optionally
@@ -76,53 +123,62 @@ a context needed to be true to execute the plan.
 from maspy import *
 
 class DummyAgent(Agent):
-    def __init__(self, agent_name, beliefs, goals):
-        super().__init__(agent_name, beliefs, goals)
-        self.add(Belief("Box",(5,10)))
+    def __init__(self, agent_name=None):
+        super().__init__(agent_name)
+        self.add(Belief("budget",(rnd.randint(6,10),rnd.randint(12,20)),adds_event=False))
+        self.add(Goal("park"))
 
-    # always execute this plan whenever the agent aquires the goal to "move_boxes".
-    # this plan also needs the agent to believe a "Box" is at some coordinate (X,Y)
-    # every plan needs at least self and src, plus the arguments from the chosen context
-    @pl(gain,Goal("move_boxes"),Belief("Box",('X','Y'))
-    def some_plan(self, src, X, Y):
+    # This plan will be executed whenever the agent gains the goal "checkPrice"
+    # Every plan needs at least self and src, plus the arguments from the trigger and context
+    # for this plan, the context is the belief of a budget with wanted e max prices
+    @pl(gain,Goal("checkPrice","Price"),Belief("budget",("WantedPrice","MaxPrice")))
+    def check_price(self,src,given_price,want_price,max_price):
         ...
 
-agent_1 = DummyAgent("Dummy_1", [Belief("my_pos",(0,0)),Belief("target_pos",(7,7))], Goal("move_boxes"))
-agent_2 = DummyAgent("Dummy_2", [Belief("my_pos",(3,3)),Belief("target_pos",(3,3))], Goal("move_boxes"))
+driver = Driver("Drv")
 ```
 
 ### Running the agents
 Running the system is simple, given the utilities support we have in place.
-The `Handler` module contains a few usefull methods to start and manage the 
+The `Admin` module contains a few useful methods to start and manage the 
 system.
 
 #### Starting all agents
 In case you only need to start all agents, the following snippet is enough.
 ```python
-ag1 = DummyAgent("foo")
-ag2 = DummyAgent("bar")
+driver1 = Driver("Drv")
+driver2 = Driver("Drv")
 
 Admin().start_system()
 ```
+In this example, both agents have the same name "Drv". 
 
-#### Starting some agents
-This snippet shows how to start agents in a arbitrary order.
+For communication to not be ambiguous, the Admin names them ("Drv",1) and ("Drv",2).
 
-```python
-ag1 = DummyAgent()
-ag2 = DummyAgent()
-
-Handler().start_agent(ag2)
-# do other things
-Handler().start_agent(ag1)
-```
 ### Comunication between Agents
 After starting the agents they may be connected to a channel.
 
 ```python
-ag1 = DummyAgent("ag1")
-ag2 = DummyAgent("ag2")
-ag3 = DummyAgent("ag3")
+from maspy import *
+
+class Manager(Agent):
+    def __init__(self, agt_name=None):
+        super().__init__(agt_name,full_log=False,show_cycle=False)
+        self.add(Belief("spotPrice",rnd.randint(12,20),adds_event=False))
+
+    @pl(gain,Goal("sendPrice"),Belief("spotPrice","SP"))
+    def send_price(self,src,spot_price):
+        self.send(src,achieve,Goal("checkPrice",spot_price),"Parking")
+
+class Driver(Agent):
+    def __init__(self, agt_name=None):
+        super().__init__(agt_name,full_log=False,show_cycle=False)
+        self.add(Belief("budget",(rnd.randint(6,10),rnd.randint(12,20)),adds_event=False))
+        self.add(Goal("park"))
+    
+    @pl(gain,Goal("park"))
+    def ask_price(self,src):
+        self.send("Manager",achieve,Goal("sendPrice"),"Parking")
 
 # connect ag1 and ag2 to channel "c"
 Handler().connect_to([ag1, ag2], [Channel("c")])
