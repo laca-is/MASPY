@@ -88,13 +88,18 @@ class Driver(Agent):
             
         self.send(src,tell,Belief("offer_answer",answer,"Parking"))
         if answer[0] == "reject": self.stop_cycle()
-            
+    
+    @pl(gain,Belief("no_spots_available"))
+    def no_spots(self,src):
+        self.print("Leaving!")
+        self.stop_cycle()
+    
     @pl(gain,Goal("park",("Park_Name","SpotID")))
     def park_on_spot(self,src,park_name,spot_id):
         self.connect_to(Environment(park_name))
         self.print(f"Parking on spot({spot_id})")
         self.action(park_name).park_spot(self.my_name,spot_id)
-        sleep(5)
+        sleep(3)
         self.print(f"Leaving spot({spot_id})")
         self.action(park_name).leave_spot(self.my_name)
         self.disconnect_from(Environment(park_name))
@@ -106,7 +111,7 @@ if __name__ == "__main__":
     park_ch = Channel("Parking")
     manager = Manager()
     driver_list = []
-    for _ in range(10):
+    for _ in range(6):
         driver_list.append(Driver("Drv"))
     Admin().connect_to(manager, [park,park_ch])
     Admin().connect_to(driver_list, park_ch)
