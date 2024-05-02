@@ -116,13 +116,18 @@ agent.add( Belief("velocity",57) )
 
 #### Defining plans
 To define plans it is also really simple, it only needs the `@pl` decoration. 
-This decoration must contain the *plan* change, the information that changed and optionally
-a context needed to be true to execute the plan.
+This decoration must contain the *plan* change {gain, lose or test}, the data that changed {Belief(s) or Goal(s)} and optionally
+a context needed to be true to execute the plan {Belief(s) or Goal(s)}.
+
+```python
+    @pl(change, changed_data, context)
+    def foo(self,src, *changed_data.args, *context.args):
+```
 
 ```python
 from maspy import *
 
-class DummyAgent(Agent):
+class Driver(Agent):
     def __init__(self, agent_name=None):
         super().__init__(agent_name)
         self.add(Belief("budget",(rnd.randint(6,10),rnd.randint(12,20)),adds_event=False))
