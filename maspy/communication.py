@@ -32,14 +32,19 @@ class CommsMultiton(type):
 
 
 class Channel(metaclass=CommsMultiton):
-    def __init__(self, comm_name) -> None:
+    def __init__(self, comm_name):
+        self.full_log = False
+        
+        from maspy.admin import Admin
+        self._my_name = comm_name
+        Admin()._add_channel(self)
+        
         from maspy.agent import Belief, Goal, Ask, Plan
         self.data_types = {Belief,Goal,Ask,Plan}
         self._my_name = comm_name
         self.agent_list: Dict[Agt_cls, Dict[Agt_name, Agt_fullname]] = {}
         self._agents: Dict[Agt_fullname, Agt_inst] = {}
         self._name = f"{type(self).__name__}:{self._my_name}"
-        self.full_log = True
         
     def print(self,*args, **kwargs):
         return print(f"{self._name}>",*args,**kwargs)
@@ -63,7 +68,7 @@ class Channel(metaclass=CommsMultiton):
             self.agent_list[type(agent).__name__] = {agent.my_name[0] : {agent.my_name}}
             self._agents[agent.my_name] = agent
         
-        self.print(f'Connecting agent {type(agent).__name__}:{agent.my_name}')
+        self.print(f'Connecting agent {type(agent).__name__}:{agent.my_name}') if self.full_log else ...
 
             
     def _rm_agents(self, agents):
@@ -79,7 +84,7 @@ class Channel(metaclass=CommsMultiton):
             del self.agent_list[type(agent).__name__][agent.my_name[0]]
         self.print(
             f"Desconnecting agent {type(agent).__name__}:{agent.my_name}"
-        )
+        ) if self.full_log else ...
 
     def _send(self, sender, target, act, message):  
         if type(act) == TypeVar: act = act.__name__ 
