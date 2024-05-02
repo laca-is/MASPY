@@ -128,6 +128,8 @@ a context needed to be true to execute the plan *{Belief(s) or Goal(s)}*.
     def foo(self,src, *changed_data.args, *context.args):
 ```
 
+Resuming the the driver example, you can implement a plan the following way:
+
 ```python
 from maspy import *
 
@@ -165,7 +167,7 @@ In this example, both agents have the same name "Drv".
 For communication to not be ambiguous, the Admin names them ("Drv",1) and ("Drv",2).
 
 ### Comunication between Agents
-After starting the agents they may be connected to a channel.
+After starting the agents they may use the default channel or be connected to private one.
 
 ```python
 from maspy import *
@@ -177,6 +179,7 @@ class Manager(Agent):
 
     @pl(gain,Goal("sendPrice"),Belief("spotPrice","SP"))
     def send_price(self,src,spot_price):
+        # The agent manager sends a goal to the manager via the Parking channel
         self.send(src,achieve,Goal("checkPrice",spot_price),"Parking")
 
 class Driver(Agent):
@@ -187,35 +190,66 @@ class Driver(Agent):
     
     @pl(gain,Goal("park"))
     def ask_price(self,src):
-        self.send("Manager",achieve,Goal("sendPrice"),"Parking")
+        # The agent driver sends a goal to the manager via the Parking channel
+        self.send("Manager", achieve, Goal("sendPrice"),"Parking")
 
-# connect ag1 and ag2 to channel "c"
-Handler().connect_to([ag1, ag2], [Channel("c")])
-# connect ag3 to channel "c"
-
-Handler().start_all_agents()
-# ag1 is send a belief to ag3 by the default channel
-ag1.send(ag3.my_name, "tell", Belief("foo"))
-
-#ag2 is sending an Objective to ag1 using a specific channel called "c"
-ag2.send(ag1.my_name, "achieve", Objective("bar"), Channel("c"))
+park_ch = Channel("Parking")
+manager = Manager()
+driver = Driver("Drv")
+Admin().connect_to([manager,driver],park_ch)
 ```
+
+The following are the different ways to send messages between agents.
+If ommited, the default channel is used.
+
+```python 
+self.send(target, "tell", Belief, Channel)
+self.send(target, "untell", Belief, Channel)
+self.send(target, "achieve", Goal, Channel)
+self.send(target, "unachieve", Goal, Channel)
+self.send(target, "askOne", Belief, Channel)
+self.send(target, "askAll", Belief, Channel)
+self.send(target, "tellHow", Plan, Channel)
+self.send(target, "untellHow", Plan, Channel)
+self.send(target, "askHow", Plan, Channel)
+```
+
 ### Environment
-`MASPY` also gives an abstraction to model the environment
+`MASPY` also gives an abstraction to model the environment.
+
+Here's how you create a parking lot for the manager and driver from before:
 
 #### Creating an environment
 
 ```python 
-from maspy.environment import Environment
+from maspy import *
 
-class MyEnv(Environment):
-    def __init__(self, env_name="my_env"):
+class Park(Environment):
+    def __init__(self, env_name=None):
         super().__init__(env_name)
+        # This creates in the environment an percept for connected agents to perceive.
+        # All percepts are, by default, translated into beliefs during perception
+        # This specific percept does not create a event when percieved by an agent 
+        self.create(Percept("spot",(1,"free"),adds_event=False))
 
-    def env_action(self):
-        # do something to change the environment state
-        ...
+    def park_spot(self, driver, spot_id):
+        # The function get gives you percepts from the environment
+        # It has various filters to make this search more precise
+        spot = self.get(Percept("spot",(spot_id,"free")))
+        if spot:
+            # This function is used to modify the arguments of an percept.
+            self.change(spot,(spot_id,agent))
+
+            # You could also remove the old and create the new
+            self.remove(spot)
+            self.create(Percept("spot",(spot_id,agent))
+
+    def leave_spot(self, driver):
+        spot = self.get(Percept("spot",("ID",agent)))
+        if spot:
+            self.change(spot,(spot.args[0],"free"))
 ```
+
 #### Allowing agents to interact with an environment
 ```python
 ag = DummyAgent("dummy")
