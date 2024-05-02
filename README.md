@@ -116,8 +116,8 @@ agent.add( Belief("velocity",57) )
 
 #### Defining plans
 To define plans it is also really simple, it only needs the `@pl` decoration. 
-This decoration must contain the *plan* change {gain, lose or test}, the data that changed {Belief(s) or Goal(s)} and optionally
-a context needed to be true to execute the plan {Belief(s) or Goal(s)}.
+This decoration must contain the *plan* change *{gain, lose or test}*, the data that changed *{Belief(s) or Goal(s)}* and optionally
+a context needed to be true to execute the plan *{Belief(s) or Goal(s)}*.
 
 ```python
     change: TypeVar('gain'|'lose'|'test')
