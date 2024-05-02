@@ -227,8 +227,7 @@ from maspy import *
 class Park(Environment):
     def __init__(self, env_name=None):
         super().__init__(env_name)
-        # This creates in the environment an percept for connected agents to perceive.
-        # All percepts are, by default, translated into beliefs during perception
+        # This creates in the environment a percept for connected agents to perceive.
         # This specific percept does not create a event when percieved by an agent 
         self.create(Percept("spot",(1,"free"),adds_event=False))
 
