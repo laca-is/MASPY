@@ -241,7 +241,7 @@ class Park(Environment):
 
             # You could also remove the old and create the new
             self.remove(spot)
-            self.create(Percept("spot",(spot_id,agent))
+            self.create(Percept("spot",(spot_id,agent)))
 
     def leave_spot(self, driver):
         spot = self.get(Percept("spot",("ID",agent)))
