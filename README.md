@@ -276,29 +276,65 @@ class Driver(Agent)
         self.action(park_name).park_spot(self.my_name,spot_id)
 ```
 
-#### Simplest Possible Agent w/ a Plan
+#### Simplest System with Every Class
 ```python
 from maspy import *
 
-class HelloAgent(Agent):
-    @pl(gain,Belief("hello"))
-    def func(self,src):
-        self.print("Hello World")
-        self.stop_cycle()
+class SimpleEnv(Environment):
+    def env_act(self, agent1, agent2):
+        self.print(f"Contact between {agent1} and {agent2}")
 
-agent = HelloAgent()
-agent.add(Belief("hello"))
-Admin().start_system()
+class SimpleAgent(Agent):
+    @pl(gain,Goal("say_hello","Agent"))
+    def send_hello(self,src,agent):
+        self.send(agent,tell,Belief("Hello"),"SimpleChannel")
+
+    @pl(gain,Belief("Hello"))
+    def recieve_hello(self,src):
+        self.print(f"Hello received from {src}")
+        self.action("SimpleEnv").env_act(self.my_name,src)
+
+if __name__ == "__main__":
+    Admin().set_logging(full_log=True)
+    agent1 = SimpleAgent()
+    agent2 = SimpleAgent()
+    env = SimpleEnv()
+    ch = Channel("SimpleChannel")
+    Admin().connect_to([agent1,agent2],[env,ch])
+    agent1.add(Goal("say_hello",(agent2.my_name,)))
+    Admin().start_system()
 ```
 
 This code will generate the following prints:
 
     Starting MASPY Program
-    Agent:('HelloAgent', 1)> Hello World
-    Agent:('HelloAgent', 1)> Shutting Down...
+    # Admin #> Registering Agent SimpleAgent:('SimpleAgent', 1)
+    # Admin #> Registering Channel:default
+    Channel:default> Connecting agent SimpleAgent:('SimpleAgent', 1)
+    # Admin #> Registering Agent SimpleAgent:('SimpleAgent', 2)
+    Channel:default> Connecting agent SimpleAgent:('SimpleAgent', 2)
+    # Admin #> Registering Environment SimpleEnv:SimpleEnv
+    # Admin #> Registering Channel:SimpleChannel
+    Environment:SimpleEnv> Connecting agent SimpleAgent:('SimpleAgent', 1)
+    Channel:SimpleChannel> Connecting agent SimpleAgent:('SimpleAgent', 1)
+    Environment:SimpleEnv> Connecting agent SimpleAgent:('SimpleAgent', 2)
+    Channel:SimpleChannel> Connecting agent SimpleAgent:('SimpleAgent', 2)
+    Agent:('SimpleAgent', 1)> Adding Goal('say_hello', ('SimpleAgent', 2), 'self')
+    Agent:('SimpleAgent', 1)> New Event: gain:Goal('say_hello', ('SimpleAgent', 2), 'self')
+    # Admin #> Starting Agents
+    Agent:('SimpleAgent', 1)> Running Plan(Event(change='gain', data=Goal(key='say_hello', _args=('Agent',), source='self'), intention=None), [], 'send_hello')
+    Channel:SimpleChannel> ('SimpleAgent', 1) sending tell:Belief('Hello', (), ('SimpleAgent', 1)) to ('SimpleAgent', 2)
+    Agent:('SimpleAgent', 2)> Adding Belief('Hello', (), ('SimpleAgent', 1))
+    Agent:('SimpleAgent', 2)> New Event: gain:Belief('Hello', (), ('SimpleAgent', 1))
+    Agent:('SimpleAgent', 2)> Running Plan(Event(change='gain', data=Belief(key='Hello', _args=(), source='self', adds_event=True), intention=None), [], 'recieve_hello')
+    Agent:('SimpleAgent', 2)> Hello received from ('SimpleAgent', 1)
+    Environment:SimpleEnv> Contact between ('SimpleAgent', 2) and ('SimpleAgent', 1)
+    # Admin #> [Closing System]
+    Agent:('SimpleAgent', 1)> Shutting Down...
+    Agent:('SimpleAgent', 2)> Shutting Down...
     Ending MASPY Program
 
-Notice that the agent is manually stoped with ```self.stop_cycle()```. 
+This program must be terminated using a *ctrl+c*.
 Otherwise the system would continue running indeterminately.
 
 ## Rough edges
