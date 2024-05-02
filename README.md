@@ -66,6 +66,8 @@ It will execute indeterminably, while doing nothing.
 #### Initial Beliefs and Goals
 The agent can start with some inital *Beliefs* or *Goals*.
 
+For most of theses explanations, the code from "examples/ex_parking.py" will be used.
+
 ```python
 from maspy import *
 
