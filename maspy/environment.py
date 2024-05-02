@@ -69,7 +69,7 @@ class Environment(metaclass=EnvironmentMultiton):
         self.full_log = full_log
         
         from maspy.admin import Admin
-        Admin()._add_channel(self)
+        Admin()._add_environment(self)
         
         self.agent_list = {}
         self._agents = {}

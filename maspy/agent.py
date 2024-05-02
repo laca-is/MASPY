@@ -236,11 +236,15 @@ class Agent:
         goals: Optional[Iterable[Goal] | Goal] = None,
         full_log = False,
         show_cycle = False,
+        show_prct = False,
+        show_slct = False,
         log_type = "Default",
         instant_mail = False
     ):              
         self.full_log = full_log
         self.show_cycle = show_cycle
+        self.show_prct = show_prct
+        self.show_slct = show_slct
         self.log_type = log_type
         
         from maspy.admin import Admin
@@ -443,20 +447,20 @@ class Agent:
         return change,belief_goal
     
     def _compare_data(self, data1, data2, ck_type,ck_args,ck_src):
-        #self.print(f"Comparing: \n\t{data1} and {data2}")
+        self.print(f"Comparing: \n\t{data1} and {data2}") if self.show_slct else ...
         if ck_type and type(data1) != type(data2):
-            #self.print("Failed at type")
+            self.print("Failed at type") if self.show_slct else ...
             return False
         if data1.key != data2.key:
-            #self.print("Failed at key")
+            self.print("Failed at key") if self.show_slct else ...
             return False
         if ck_src and data2.source != DEFAULT_SOURCE and data1.source != data2.source:
-            #self.print("Failed at source")
+            self.print("Failed at source") if self.show_slct else ...
             return False
         if not ck_args:
             return True
         if data1.args_len != data2.args_len:
-            #self.print("Failed at args_len")
+            self.print("Failed at args_len") if self.show_slct else ...
             return False
         for arg1,arg2 in zip(data1._args,data2._args):
             if isinstance(arg1,str) and (arg1[0].isupper()):
@@ -466,10 +470,10 @@ class Agent:
             elif arg1 == arg2:
                 continue
             else:
-                #self.print(f"Failed at args {arg1} x {arg2}")
+                self.print(f"Failed at args {arg1} x {arg2}") if self.show_slct else ...
                 return False
         else:
-            #self.print("Data is Compatible")
+            self.print("Data is Compatible") if self.show_slct else ...
             return True
                       
     def _run_plan(self, plan: Plan, trigger: Belief | Goal, args: tuple):
@@ -595,7 +599,7 @@ class Agent:
     def _perception(self):
         percept_dict = dict()
         for env_name in self._environments:
-            self.print(f"Percepting '{env_name}'") if self.full_log else ...
+            self.print(f"Percepting '{env_name}'") if self.show_cycle else ...
             percept_dict.update(self._environments[env_name].perception())
         percept_dict = self._percepts_to_beliefs(percept_dict)
         self._revise_beliefs(percept_dict)
@@ -612,7 +616,8 @@ class Agent:
      
     def _revise_beliefs(self, percept_dict: dict):
         for source, keys in self.__beliefs.copy().items():
-            if source == DEFAULT_SOURCE: continue
+            if source == DEFAULT_SOURCE: continue # Does not remove "self"
+            if type(source) == tuple: continue # Does not remove messages
             if source in percept_dict:
                 for key, beliefs in keys.copy().items():
                     if key in percept_dict[source]: 
@@ -621,19 +626,25 @@ class Agent:
                         self._new_event("gain",gain) # Gained new specific belief
                         self._new_event("lose",lose) # Lost an old specific belief
                         del percept_dict[source][key]
+                        if self.show_prct:
+                            self.print(f"Beliefs gained in revision: {gain}")
+                            self.print(f"Beliefs lost in revision: {lose}") 
                     else:
                         self._new_event("lose",self.__beliefs[source][key]) # Lost whole key belief
+                        self.print(f"Beliefs lost in revision: {self.__beliefs[source][key]}") if self.show_prct else ...
                         del self.__beliefs[source][key]
                         
                 if percept_dict[source] == {}:
                     del percept_dict[source]
             else:
                 for beliefs in keys.values():
+                    self.print(f"Beliefs lost in revision: {beliefs}") if self.show_prct else ...
                     self._new_event("lose",beliefs) # Lost whole source of belief (env)
                 del self.__beliefs[source]
         
         for keys in percept_dict.values():
             for beliefs in keys.values():
+                self.print(f"Beliefs gained in revision: {beliefs}") if self.show_prct else ...
                 self._new_event("gain",beliefs) # Gained beliefs of new sources/keys
         self.__beliefs.update(percept_dict)
     
@@ -646,7 +657,9 @@ class Agent:
         return self.get(Plan,event,all=True,ck_src=False)
     
     def _select_plan(self, plans, event:Event):
-        if plans is None: return None, None
+        if plans is None:
+            self.print(f"No plans found for {event}") if self.show_cycle else ... 
+            return None, None
         
         args = tuple()
         for plan in plans:

@@ -26,6 +26,8 @@ class Admin(metaclass=AdminMeta):
         self.full_log = False
         self.agt_full_log = False
         self.agt_sh_cycle = False
+        self.agt_sh_prct = False
+        self.agt_sh_slct = False
         self.ch_full_log = False
         self.env_full_log = False
         self._started_agents: List[Agent] = list()
@@ -68,6 +70,8 @@ class Admin(metaclass=AdminMeta):
         self._agents[agent.my_name] = agent
         agent.full_log = self.agt_full_log
         agent.show_cycle = self.agt_sh_cycle
+        agent.show_prct = self.agt_sh_prct
+        agent.show_slct = self.agt_sh_slct
         self.print(
             f"Registering Agent {type(agent).__name__}:{agent.my_name}"
         ) if self.full_log else ...
@@ -92,10 +96,16 @@ class Admin(metaclass=AdminMeta):
     def _add_channel(self, channel: Channel):
         self._channels[channel._my_name] = channel
         channel.full_log = self.ch_full_log
+        self.print(
+            f"Registering {type(channel).__name__}:{channel._my_name}"
+        ) if self.full_log else ...
 
     def _add_environment(self, environment: Environment):
         self._environments[environment._my_name] = environment
         environment.full_log = self.env_full_log
+        self.print(
+            f"Registering Environment {type(environment).__name__}:{environment._my_name}"
+        ) if self.full_log else ...
     
     def start_system(self):
         no_agents = True
@@ -164,7 +174,8 @@ class Admin(metaclass=AdminMeta):
                 
                 target._add_agent(agent)
 
-    def set_logging(self, full_log: bool, show_cycle: bool=False, 
+    def set_logging(self, full_log: bool, show_cycle: bool=False,
+                    show_prct: bool=False, show_slct: bool=False, 
                      set_admin=True,
                      set_agents=True,
                      set_channels=True,
@@ -173,10 +184,10 @@ class Admin(metaclass=AdminMeta):
         self.full_log = True if full_log and set_admin else False
         self.agt_full_log = True if full_log and set_agents else False
         self.agt_sh_cycle = True if show_cycle and set_agents else False
+        self.agt_sh_prct = True if show_prct and set_agents else False
+        self.agt_sh_slct  = True if show_slct and set_agents else False
         self.ch_full_log = True if full_log and set_channels else False
         self.env_full_log = True if full_log and set_environments else False
-        
-        print(self.full_log,self.agt_full_log,self.agt_sh_cycle,self.ch_full_log,self.env_full_log)
 
     def slow_cycle_by(self, time: int | float):
         for agent in self._agents.values():
