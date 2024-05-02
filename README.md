@@ -92,7 +92,7 @@ Here are some info about *Beliefs* and *Goals* being created and removed.
 agent = DummyAgent("Ag")
 agent.add( Goal(key, args, source) )
 agent.rm( Goal(key, args, source) )
-
+        
 agent.add( Goal("check_house", {"Area": [50,100], "Rooms": 5}, ("Seller",27) ) )
 agent.add( Goal("SendInfo", ("Information",["List","of","Information",42]) ) )
 agent.rm( Goal("walk", source=("trainer",2)) )
@@ -120,6 +120,10 @@ This decoration must contain the *plan* change {gain, lose or test}, the data th
 a context needed to be true to execute the plan {Belief(s) or Goal(s)}.
 
 ```python
+    change: TypeVar('gain'|'lose'|'test')
+    changed_data: Iterable[Belief | Goal] | Belief | Goal
+    context: Iterable[Belief | Goal] | Belief | Goal
+
     @pl(change, changed_data, context)
     def foo(self,src, *changed_data.args, *context.args):
 ```
