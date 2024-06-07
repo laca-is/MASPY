@@ -361,46 +361,74 @@ ___.print_plans #  Print all agent's current plans
 ___.print_events #  Print all agent's current events
 
 """
-print a string using with the agent's name
+Prints the given arguments with the agent's name as a prefix.
+Args:
+    *args: The arguments to be printed.
+    **kwargs: The keyword arguments to be printed.
+Returns:
+    None
 """
 ___.print(*args, **kwargs ) 
 
 """
-connects agent to a Channel or Environment
+Connects agent to a target
+Args: 
+    target - Channel, Environment or String
+    target_name - String (optional)
+Returns: 
+    Connected Channel or Environment
 """
-___.connect_to(target: Channel | Environment | str, target_name: str = None)
+___.connect_to(target: Channel | Environment | String, target_name: String = None)
 
 """
-disconnects agent from a Channel or Environment
+Disconnects agent from a target
+Args: 
+    target - Channel or Environment
+Returns: 
+    None
 """
-___.disconnect_from(self, target: Channel | Environment)
+___.disconnect_from(target: Channel | Environment)
 
 """
-adds one or more beliefs and(or) goals in agent
+Adds one or more beliefs and(or) goals in agent
+Args: 
+    data_type - Belief, Goal, Beliefs and(or) Goals
+Returns: 
+    None
 """
 ___.add(data_type: Belief | Goal | Iterable[Belief | Goal])
 
 """
-removes one or more beliefs and(or) goals from agent
+Removes one or more beliefs and(or) goals from agent
+Args: 
+    data_type - Belief, Goal, Beliefs and(or) Goals
+Returns: 
+    None
 """
 ___.rm(data_type: Belief | Goal | Iterable[Belief | Goal])
 
 """
-checks if the agent contains an belief, goal, plan or event
-returns True or False
+Checks if the agent has an belief, goal, plan or event
+Args: 
+    data_type - Belief, Goal, Plan or Event
+Returns: 
+    bool: True if has, False if not
 """
 ___.has(data_type: Belief | Goal | Plan | Event)
 
 """  
-search agent for a similar belief, goal, plan or event
-  optionally, search using info from a belief, goal, plan or event
-  optionally, return all similarlly found data
-  optional similarity checks:
-	ck_chng - plan or event change must be the same
-	ck_type - type must be the same
-	ck_args - args
-	ck_src 
-  returns belief, goal, plan, event or Iterable of one
+Retrieves a specific data from the agent's knowledge on the given data_type and search parameters
+Args:
+    data_type - Belief, Goal, Plan or Event: The type of data to retrieve.
+    search_with - Belief, Goal, Plan or Event: The info to search with. Defaults to None.
+    all - bool: Whether to return all matching data or just the first match. Defaults to False.
+    ck_chng - bool: Whether to check the changes argument in the data. Defaults to True.
+    ck_type - bool: Whether to check the type of the data. Defaults to True.
+    ck_args - bool: Whether to check the arguments of the data. Defaults to True.
+    ck_src - bool: Whether to check the source of the data. Defaults to True.
+Returns:
+    List[data] | data: The retrieved data of the specified type.
+    If no matches are found, returns None.
 """  
 ___.get(data_type: Belief | Goal | Plan | Event,
         search_with:  Belief | Goal | Plan | Event = None,
@@ -413,22 +441,50 @@ ACTS = 	tell | untell |
 
 MSG = Belief | Ask | Goal | Plan
 
-agent sends message to target agent(s), optionally using a channel
+Sends a message to target agent or agents, optionally through a channel
+Args:
+    target - String | Tuple | List | "broadcast": The target agent or agents to send the message to.
+    act - ACTS: The directive of the message.
+    msg - MSG | String: The message to send.
+    channel - String: The channel to send the message through. Defaults to DEFAULT_CHANNEL.
+Returns:
+    None
 """
-___.send(target: str | tuple | List | "broadcast", act: ACTS, msg: MSG | str, channel: str = DEFAULT_CHANNEL)
+___.send(target: String | Tuple | List | "broadcast", act: ACTS, msg: MSG | String, channel: String = DEFAULT_CHANNEL)
 
 """
-find another agent's name also connected in an Environment or Channel
+Finds another agent's name also connected in an Environment or Channel
+Args:
+    agent_name - String: The name of the agent to find.
+    cls_type - String | Channel | Environment: The type of class to search in. Defaults to None.
+    cls_name - String: The name of the class to search in. Defaults to ["env", "default"].
+    cls_instance - Any The specific instance of the class to search in. Defaults to None.
+Returns:
+    Any: The found agent.
 """
-___.find_in(self, agent_name, cls_type=None, cls_name=["env","default"], cls_instance=None
+___.find_in(agent_name, cls_type=None, cls_name=["env","default"], cls_instance=None
 
 """
-returns connected Environment isntance to make an action
+Retrieves the environment instance with the given name to make an action
+Args:
+    env_name - String: The name of the environment to retrieve.
+Returns:
+    Environment: The retrieved environment.
 """
 ___.action(env_name: str)
 
 """
-ends the agent reasoning cycle
+Stop the cycle of the agent.
+    
+This method stops the cycle of the agent by setting the `stop_flag` event to True,
+indicating that the cycle should be stopped. It also sets the `paused_agent` flag
+to True, indicating that the agent has been paused.Finally, it sets the `running`
+flag to False, indicating that the agent is no longer running.
+
+Args:
+    None
+Returns:
+    None
 """
 ___.stop_cycle()
 ```
