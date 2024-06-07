@@ -8,7 +8,7 @@ will contain *Beliefs*, its knowledge, *Desire*, its wants, and
 *MASPY* creates an abstraction layer to model the agents and the environment
 where the agents will act. An agent may contain any number of *Beliefs*, 
 *Objectives*, *Plans*, these to classes model desires and intentions, 
-respectively. The agent can comunicate with others agents, by sending
+respectively. The agent can communicate with others agents, by sending
 or requesting any of the previous entitys. This library
 uses a Knowledge Query Model Language to model the communication between agents
 using acts of speech, or perfomatives, as a base model, in this way an agent can ask, tell,
@@ -17,7 +17,7 @@ command or teach anything it needs and knows.
 Table of Contents
 - [`Managing Beliefs and Goals`](#Managing-Beliefs-and-Goals): Creating, removing and using Beliefs and Goals
 - [`Defining plans`](#Defining-plans): Proprieties for the definition of Plans
-- [`Comunication between Agents`](#Comunication-between-Agents): How to send messages between Agents
+- [`Communication between Agents`](#Communication-between-Agents): How to send messages between Agents
 - [`Managing the Environment`](#Environment): How to create Environments and its Percepts
 - [`Internal Functions`](#Internal-Functions): All available MASPY functions.
 
@@ -175,7 +175,7 @@ In this example, both agents have the same name "Drv".
 
 For communication to not be ambiguous, the Admin names them ("Drv",1) and ("Drv",2).
 
-### Comunication between Agents
+### Communication between Agents
 After starting the agents they may use the default channel or be connected to private one.
 
 ```python
