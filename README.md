@@ -482,7 +482,7 @@ Args:
 Returns:
     Environment: The retrieved environment.
 """
-___.action(env_name: str)
+___.action(env_name: String)
 
 """
 Stop the cycle of the agent.
@@ -612,5 +612,5 @@ Args:
 Returns:
     None
 """
-Admin().slow_cycle_by(time: int | float):
+Admin().slow_cycle_by(time: Integer | Float):
 ```
