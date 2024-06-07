@@ -462,7 +462,7 @@ Args:
 Returns:
     Any: The found agent.
 """
-___.find_in(agent_name, cls_type=None, cls_name=["env","default"], cls_instance=None
+___.find_in(agent_name, cls_type=None, cls_name=["env","default"], cls_instance=None)
 
 """
 Retrieves the environment instance with the given name to make an action
