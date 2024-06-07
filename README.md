@@ -14,6 +14,8 @@ uses a Knowledge Query Model Language to model the communication between agents
 using acts of speech, or perfomatives, as a base model, in this way an agent can ask, tell,
 command or teach anything it needs and knows.
 
+in [Section `Internal Functions`](#Internal-Functions)
+
 ## Install
 
 To install [MASPY](https://pypi.org/project/maspy-ml/) you can use package-management system `pip`: 
