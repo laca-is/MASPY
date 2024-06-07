@@ -16,8 +16,10 @@ command or teach anything it needs and knows.
 
 Table of Contents
 - [`Managing Beliefs and Goals`](#Managing-Beliefs-and-Goals): Creating, removing and using Beliefs and Goals
-- [`Defining plans`](#Defining-plans): Making a Function be Plan
-- [`Internal Functions`](#Internal-Functions): all available MASPY functions are documented.
+- [`Defining plans`](#Defining-plans): Proprieties for the definition of Plans
+- [`Comunication between Agents`](#Comunication-between-Agents): How to send messages between Agents
+- [`Managing the Environment`](#Environment): How to create Environments and its Percepts
+- [`Internal Functions`](#Internal-Functions): All available MASPY functions.
 
 ## Install
 
