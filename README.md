@@ -353,6 +353,7 @@ MASPY: Towards the Creation of BDI Multi-Agent Systems, WESAAC 2023
 # Internal Functions
 
 ___ : Represents either an object instance outside its class, or self inside its class.
+
 Iterable : Represents any data structuture that can be iterated.
 
 ## Agent
