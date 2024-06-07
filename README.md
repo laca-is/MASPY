@@ -350,3 +350,123 @@ with over thousands of agents was possible.
 
 MASPY: Towards the Creation of BDI Multi-Agent Systems, WESAAC 2023
 
+# Internal Functions
+
+
+## Agent
+```python
+___.print_beliefs """  Print all agent's current beliefs-
+___.print_goals """  Print all agent's current goals
+___.print_plans """  Print all agent's current plans
+___.print_events """  Print all agent's current events
+
+"""  print a string using with the agent's name
+___.print(*args, **kwargs ) 
+
+"""  connects agent to a Channel or Environment
+___.connect_to(target: Channel | Environment | str, target_name: str = None)
+
+"""  disconnects agent from a Channel or Environment
+___.disconnect_from(self, target: Channel | Environment)
+
+"""  adds one or more beliefs and(or) goals in agent
+___.add(data_type: Belief | Goal | Iterable[Belief | Goal])
+
+"""  removes one or more beliefs and(or) goals from agent
+___.rm(data_type: Belief | Goal | Iterable[Belief | Goal])
+
+"""  checks if the agent contains an belief, goal, plan or event
+"""  returns True or False
+___.has(data_type: Belief | Goal | Plan | Event)
+
+"""  
+search agent for a similar belief, goal, plan or event
+  optionally, search using info from a belief, goal, plan or event
+  optionally, return all similarlly found data
+  optional similarity checks:
+	ck_chng - plan or event change must be the same
+	ck_type - type must be the same
+	ck_args - args
+	ck_src 
+  returns belief, goal, plan, event or Iterable of one
+"""  
+___.get(data_type: Belief | Goal | Plan | Event,
+        search_with:  Belief | Goal | Plan | Event = None,
+        all = False, ck_chng=True, ck_type=True, ck_args=True, ck_src=True)
+
+ACTS = 	tell | untell |
+		tellHow | untellHow |
+		achieve | unachieve |
+		askOne | askAll | askHow
+
+MSG = Belief | Ask | Goal | Plan
+
+"""  agent sends message to target agent(s), optionally using a channel
+___.send(target: str | tuple | List | "broadcast", act: ACTS, msg: MSG | str, channel: str = DEFAULT_CHANNEL)
+
+"""  find another agent's name also connected in an Environment or Channel
+___.find_in(self, agent_name, cls_type=None, cls_name=["env","default"], cls_instance=None
+
+"""  returns connected Environment isntance to make an action
+___.action(env_name: str)
+
+"""  ends the agent reasoning cycle
+___.stop_cycle()
+```
+
+## Environment
+
+```python
+___.print_percepts """  print all environment's current percepts
+
+"""  print a string using with the environment's name
+___.print(*args, **kwargs ) 
+
+"""  create in environment one or multiple percepts
+___.create(percept: Iterable[Percept] | Percept)
+
+"""  search environment for a similar percepts
+"""  optionally return all similar percepts
+"""  optional similarity checks:
+	ck_group -
+	ck_args -
+"""  return requested information
+___.get(percept: Percept, all: Boolean=False,
+		ck_group: Boolean=False, ck_args: Boolean=True)
+
+"""  change the args from an old percept
+___.change(old_percept: Percept, new_args: Percept.args)
+
+"""  delete from environment one or multiple percepts
+___.delete(percept: Iterable[Percept] | Percept)
+```
+
+## Admin
+
+```python
+"""  starts the reasoning cycle of all created agents
+___.start_system()
+
+"""  starts the reasoning cycle of one of multiple agents
+___.start_agents(agents: Iterable[Agent] | Agent)
+
+"""  connects any number agents to any number of Channels and Environments
+___.connect_to(agents: Iterable[Agent] | Agent, targets: Iterable[Environment | Channel] | Environment | Channel)
+
+"""  Log Settings
+""" 
+ Optionally set to show
+	- execution logs with full_log;
+	- reasoning cycle logs with show_cycle;
+	- perception of environments with show_prct;
+	- selection of plans with show_slct;
+ Optionally set what class this effects with set_<class>= True | False
+""" 
+___.set_logging(full_log: bool, show_cycle: bool=False,
+                show_prct: bool=False, show_slct: bool=False, 
+                set_admin=True, set_agents=True,
+                set_channels=True, set_environments=True)
+					
+"""  slow all agents reasoning cycles by x seconds
+___.slow_cycle_by(self, time: int | float):
+```
