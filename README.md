@@ -460,7 +460,8 @@ Args:
 Returns:
     None
 """
-___.send(target: String | Tuple | List | "broadcast", act: ACTS, msg: MSG | String, channel: String = DEFAULT_CHANNEL)
+___.send(target: String | Tuple | List | "broadcast", act: ACTS,
+	 msg: MSG | String, channel: String = DEFAULT_CHANNEL)
 
 """
 Finds another agent's name also connected in an Environment or Channel
@@ -585,7 +586,8 @@ Args:
 Returns:
     None
 """
-Admin().connect_to(agents: Iterable[Agent] | Agent, targets: Iterable[Environment | Channel] | Environment | Channel)
+Admin().connect_to(agents: Iterable[Agent] | Agent,
+		   targets: Iterable[Environment | Channel] | Environment | Channel)
 
 """
 Sets the logging configuration for the whole system
