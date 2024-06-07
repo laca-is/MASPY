@@ -14,7 +14,10 @@ uses a Knowledge Query Model Language to model the communication between agents
 using acts of speech, or perfomatives, as a base model, in this way an agent can ask, tell,
 command or teach anything it needs and knows.
 
-In the Section [`Internal Functions`](#Internal-Functions), all available MASPY functions are documented.
+Table of Contents
+- [`Managing Beliefs and Goals`](#Managing-Beliefs-and-Goals): Creating, removing and using Beliefs and Goals
+- [`Defining plans`](#Defining-plans): Making a Function be Plan
+- [`Internal Functions`](#Internal-Functions): all available MASPY functions are documented.
 
 ## Install
 
