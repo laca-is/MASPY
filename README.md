@@ -352,6 +352,8 @@ MASPY: Towards the Creation of BDI Multi-Agent Systems, WESAAC 2023
 
 # Internal Functions
 
+___ : Represents either an object instance outside its class, or self inside its class.
+Iterable : Represents any data structuture that can be iterated.
 
 ## Agent
 ```python
@@ -435,9 +437,9 @@ ___.get(data_type: Belief | Goal | Plan | Event,
         all = False, ck_chng=True, ck_type=True, ck_args=True, ck_src=True)
 """
 ACTS = 	tell | untell |
-		tellHow | untellHow |
-		achieve | unachieve |
-		askOne | askAll | askHow
+	tellHow | untellHow |
+	achieve | unachieve |
+	askOne | askAll | askHow
 
 MSG = Belief | Ask | Goal | Plan
 
@@ -550,36 +552,55 @@ ___.delete(percept: Iterable[Percept] | Percept)
 
 ```python
 """
-starts the reasoning cycle of all created agents
+Starts the reasoning cycle of all created agents
+Args:
+    None
+Returns:
+    None
 """
-___.start_system()
+Admin().start_system()
 
 """
-starts the reasoning cycle of one of multiple agents
+Starts the reasoning cycle of one of multiple agents
+Args:
+    agents: Iterable[Agent] | Agent: The agent(s) to start their reasoning cycle
+Returns:
+    None
 """
-___.start_agents(agents: Iterable[Agent] | Agent)
+Admin().start_agents(agents: Iterable[Agent] | Agent)
 
 """
-connects any number agents to any number of Channels and Environments
+Connects any number agents to any number of Channels and Environments
+Args:
+    agents: Iterable[Agent] | Agent: The agent(s) to connect
+    targets: Iterable[Environment | Channel] | Environment | Channel: The target(s) to connect to
+Returns:
+    None
 """
-___.connect_to(agents: Iterable[Agent] | Agent, targets: Iterable[Environment | Channel] | Environment | Channel)
+Admin().connect_to(agents: Iterable[Agent] | Agent, targets: Iterable[Environment | Channel] | Environment | Channel)
 
-# Log Settings
+"""
+Sets the logging configuration for the whole system
+Args:
+    full_log: bool: Whether to show execution logs
+    show_cycle: bool: Whether to show reasoning cycle logs
+    show_prct: bool: Whether to show perception logs
+    show_slct: bool: Whether to show selection of plans logs
+    set_<class>: bool: Whether to affect the class to True | False
+Returns:
+    None
 """ 
- Optionally set to show
-	- execution logs with full_log;
-	- reasoning cycle logs with show_cycle;
-	- perception of environments with show_prct;
-	- selection of plans with show_slct;
- Optionally set what class this effects with set_<class>= True | False
-""" 
-___.set_logging(full_log: bool, show_cycle: bool=False,
+Admin().set_logging(full_log: bool, show_cycle: bool=False,
                 show_prct: bool=False, show_slct: bool=False, 
                 set_admin=True, set_agents=True,
                 set_channels=True, set_environments=True)
 					
 """
-slow all agents reasoning cycles by x seconds
+Slows all agents reasoning cycles by x seconds
+Args:
+    time: int | float: The time to sleep in seconds
+Returns:
+    None
 """
-___.slow_cycle_by(self, time: int | float):
+Admin().slow_cycle_by(time: int | float):
 ```
