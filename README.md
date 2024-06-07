@@ -495,32 +495,53 @@ ___.stop_cycle()
 ___.print_percepts # prints all environment's current percepts
 
 """
-prints a string using with the environment's name
+Prints the given arguments with the environment's name as a prefix.
+Args:
+    *args: The arguments to be printed.
+    **kwargs: The keyword arguments to be printed.
+Returns:
+    None
 """
 ___.print(*args, **kwargs ) 
 
 """
-creates in environment one or multiple percepts
+Creates in environment one or multiple percepts
+Args:
+    percept - Iterable[Percept] | Percept: The one or multiple Percept to be created.
+Returns:
+    None
 """
 ___.create(percept: Iterable[Percept] | Percept)
 
 """
-search environment for a similar percepts
-optionally return all similar percepts
-optional similarity checks:
-	ck_group -
-	ck_args -
-return requested information
+Retrieves from environment one or multiple percepts that match the given percept
+Args:
+    percept - Percept: The percept to search for.
+    all - bool: If True, returns all matching percepts. Defaults to False.
+    ck_group - bool: Whether to check the group of the percept. Defaults to False.
+    ck_args - bool: Whether to check the arguments of the percept. Defaults to True.
+Returns:
+    List[Percept] | Percept: The retrieved percept(s).
+    If no matches are found, returns None.
 """
 ___.get(percept: Percept, all: Boolean=False, ck_group: Boolean=False, ck_args: Boolean=True)
 
 """
-change the args from an old percept
+Changes the arguments of a percept
+Args:
+    old_percept - Percept: The percept to be changed.
+    new_args - Percept.args: The new arguments for the percept.
+Returns:
+    None
 """
 ___.change(old_percept: Percept, new_args: Percept.args)
 
 """
-deletes from environment one or multiple percepts
+Deletes from environment one or multiple percepts
+Args:
+    percept - Iterable[Percept] | Percept: The one or multiple Percept to be deleted.
+Returns:
+    None
 """
 ___.delete(percept: Iterable[Percept] | Percept)
 ```
