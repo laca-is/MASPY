@@ -27,6 +27,10 @@ To install [MASPY](https://pypi.org/project/maspy-ml/) you can use package-manag
 
         `pip install maspy-ml` 
 
+To update your already installed version of MASPY to the latest one, you can use:
+
+	`pip install maspy-ml -U`
+
 The minimum version of `Python` guarateed to work is 3.10, altough earlier 
 versions may work.
 
