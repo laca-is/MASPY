@@ -154,7 +154,7 @@ class Driver(Agent):
 
     # This plan will be executed whenever the agent gains the goal "checkPrice"
     # Every plan needs at least self and src, plus the arguments from the trigger and context
-    # for this plan, the context is the belief of a budget with wanted e max prices
+    # for this plan, the context is the belief of a budget with wanted and max prices
     @pl(gain,Goal("checkPrice","Price"),Belief("budget",("WantedPrice","MaxPrice")))
     def check_price(self,src,given_price,want_price,max_price):
         ...
@@ -382,17 +382,17 @@ Args:
 Returns:
     None
 """
-___.print(*args, **kwargs ) 
+___.print(*args, **kwargs) 
 
 """
 Connects agent to a target
 Args: 
-    target - Channel, Environment or String
-    target_name - String (optional)
+    target - Channel, Environment or str
+	when target is str it searches for a file with str for its name
 Returns: 
-    Connected Channel or Environment
+    Connected Channel, Environment or None
 """
-___.connect_to(target: Channel | Environment | String, target_name: String = None)
+___.connect_to(target: Environment | Channel | str)
 
 """
 Disconnects agent from a target
@@ -423,9 +423,9 @@ ___.rm(data_type: Belief | Goal | Iterable[Belief | Goal])
 
 """
 Checks if the agent has an belief, goal, plan or event
-Args: 
+Args:
     data_type - Belief, Goal, Plan or Event
-Returns: 
+Returns:
     bool: True if has, False if not
 """
 ___.has(data_type: Belief | Goal | Plan | Event)
@@ -457,36 +457,40 @@ MSG = Belief | Ask | Goal | Plan
 
 Sends a message to target agent or agents, optionally through a channel
 Args:
-    target - String | Tuple | List | "broadcast": The target agent or agents to send the message to.
+    target - str, tuple or list: The target agent or agents to send the message to.
     act - ACTS: The directive of the message.
-    msg - MSG | String: The message to send.
-    channel - String: The channel to send the message through. Defaults to DEFAULT_CHANNEL.
+    msg - MSG, str: The message to send.
+    channel - str: The channel to send the message through. Defaults to DEFAULT_CHANNEL.
 Returns:
     None
 """
-___.send(target: String | Tuple | List | "broadcast", act: ACTS,
-	 msg: MSG | String, channel: String = DEFAULT_CHANNEL)
+___.send(target: str | tuple | list, act: ACTS, msg: MSG | str, channel: str = DEFAULT_CHANNEL)
 
 """
 Finds another agent's name also connected in an Environment or Channel
 Args:
-    agent_name - String: The name of the agent to find.
-    cls_type - String | Channel | Environment: The type of class to search in. Defaults to None.
-    cls_name - String: The name of the class to search in. Defaults to ["env", "default"].
-    cls_instance - Any The specific instance of the class to search in. Defaults to None.
+    agent_name - str or list[str]: The class agent or list containing the class name and instance name.
+    cls_type - str or None: The type of class to search in. Defaults to "channel".	
+    cls_name - str or None: The name of the class to search in. Defaults to "default".
+    cls_instance Environment, Channel or None - An specific instance of the class to search in. Defaults to None.
 Returns:
-    Any: The found agent.
+    dict[str, set[tuple]], set[tuple] or None: A dictionary, set of tuples, or None based on the agent name provided.
+	str -> Agent Class
+	tuple -> (Agent Name, ID)
 """
-___.find_in(agent_name, cls_type=None, cls_name=["env","default"], cls_instance=None)
+___.find_in(agent_name: str | list[str],
+  	    cls_type: str = "channel",
+  	    cls_name: str = "default", 
+            cls_instance: Environment | Channel | None = None)
 
 """
 Retrieves the environment instance with the given name to make an action
 Args:
-    env_name - String: The name of the environment to retrieve.
+    env_name - str: The name of the environment to retrieve.
 Returns:
-    Environment: The retrieved environment.
+    Environment or None: The retrieved environment or None found.
 """
-___.action(env_name: String)
+___.action(env_name: str)
 
 """
 Stop the cycle of the agent.
@@ -522,11 +526,11 @@ ___.print(*args, **kwargs )
 """
 Creates in environment one or multiple percepts
 Args:
-    percept - Iterable[Percept] | Percept: The one or multiple Percept to be created.
+    percept - list[Percept] | Percept: The one or multiple Percept to be created.
 Returns:
     None
 """
-___.create(percept: Iterable[Percept] | Percept)
+___.create(percept: list[Percept] | Percept)
 
 """
 Retrieves from environment one or multiple percepts that match the given percept
@@ -536,10 +540,10 @@ Args:
     ck_group - bool: Whether to check the group of the percept. Defaults to False.
     ck_args - bool: Whether to check the arguments of the percept. Defaults to True.
 Returns:
-    List[Percept] | Percept: The retrieved percept(s).
+    List[Percept] or Percept: The retrieved percept(s).
     If no matches are found, returns None.
 """
-___.get(percept: Percept, all: Boolean=False, ck_group: Boolean=False, ck_args: Boolean=True)
+___.get(percept: Percept, all: bool=False, ck_group: bool=False, ck_args: bool=True)
 
 """
 Changes the arguments of a percept
@@ -558,7 +562,7 @@ Args:
 Returns:
     None
 """
-___.delete(percept: Iterable[Percept] | Percept)
+___.delete(percept: list[Percept] | Percept)
 ```
 
 ## Admin
@@ -576,21 +580,21 @@ Admin().start_system()
 """
 Starts the reasoning cycle of one of multiple agents
 Args:
-    agents: Iterable[Agent] | Agent: The agent(s) to start their reasoning cycle
+    agents: list[Agent] or Agent: The agent(s) to start their reasoning cycle
 Returns:
     None
 """
-Admin().start_agents(agents: Iterable[Agent] | Agent)
+Admin().start_agents(agents: Union[list[Agent], Agent])
 
 """
 Connects any number agents to any number of Channels and Environments
 Args:
-    agents: Iterable[Agent] | Agent: The agent(s) to connect
-    targets: Iterable[Environment | Channel] | Environment | Channel: The target(s) to connect to
+    agents: Iterable[Agent] or Agent: The agent(s) to connect
+    targets: Iterable[Environment or Channel], Environment or Channel: The target(s) to connect to
 Returns:
     None
 """
-Admin().connect_to(agents: Iterable[Agent] | Agent,
+Admin().connect_to(agents: Iterable | Agent,
 		   targets: Iterable[Environment | Channel] | Environment | Channel)
 
 """
@@ -616,5 +620,5 @@ Args:
 Returns:
     None
 """
-Admin().slow_cycle_by(time: Integer | Float):
+Admin().slow_cycle_by(time: int | float):
 ```
