@@ -1,11 +1,14 @@
 from threading import Lock
 from collections.abc import Iterable
-from typing import Dict, TypeVar
+from typing import Dict, TypeVar, TYPE_CHECKING, Union, Any
 
-Agt_name = TypeVar('Agt_name')
-Agt_cls = TypeVar('Agt_cls')
-Agt_inst = TypeVar('Agt_inst')
-Agt_fullname = TypeVar('Agt_fullname')
+if TYPE_CHECKING:
+    from maspy.agent import Agent, Belief, Goal, Ask, Plan
+
+Agt_name = TypeVar('Agt_name', bound=str)
+Agt_cls = TypeVar('Agt_cls', bound=str)
+Agt_inst = TypeVar('Agt_inst', bound=object)
+Agt_fullname = TypeVar('Agt_fullname', bound=tuple[str,int])
 
 tell= TypeVar('tell')
 untell = TypeVar('untell')
@@ -17,7 +20,13 @@ askOne = TypeVar('askOne')
 askAll = TypeVar('askAll')
 askHow = TypeVar('askHow')
 
+ACT = Union[tell,untell,tellHow,untellHow,achieve,unachieve,askOne,askAll,askHow]
+
 broadcast = TypeVar('broadcast')
+
+
+def is_broadcast(target: Any) -> bool:
+    return target == broadcast
 
 class CommsMultiton(type):
     _instances: Dict[str, "Channel"] = {}
@@ -32,8 +41,8 @@ class CommsMultiton(type):
 
 
 class Channel(metaclass=CommsMultiton):
-    def __init__(self, comm_name):
-        self.full_log = False
+    def __init__(self, comm_name:str="default"):
+        self.show_exec = False
         
         from maspy.admin import Admin
         self._my_name = comm_name
@@ -42,21 +51,24 @@ class Channel(metaclass=CommsMultiton):
         from maspy.agent import Belief, Goal, Ask, Plan
         self.data_types = {Belief,Goal,Ask,Plan}
         self._my_name = comm_name
-        self.agent_list: Dict[Agt_cls, Dict[Agt_name, Agt_fullname]] = {}
-        self._agents: Dict[Agt_fullname, Agt_inst] = {}
+        # dict[Agt_cls, dict[Agt_name, set[Agt_fullname]]]
+        self.agent_list: dict[str, dict[str, set[tuple]]] = dict()
+        # dict[Agt_fullname, Agt_inst]
+        self._agents: dict[tuple, 'Agent'] = dict()
         self._name = f"{type(self).__name__}:{self._my_name}"
         
     def print(self,*args, **kwargs):
         return print(f"{self._name}>",*args,**kwargs)
     
-    def add_agents(self, agents):
-        try:
+    def add_agents(self, agents: Union[list['Agent'],'Agent']):
+        if isinstance(agents, list):
             for agent in agents:
                 self._add_agent(agent)
-        except TypeError:
+        else:
             self._add_agent(agents)
 
-    def _add_agent(self, agent):
+    def _add_agent(self, agent: 'Agent'):
+        assert isinstance(agent.my_name, tuple)
         if type(agent).__name__ in self.agent_list:
             if agent.my_name[0] in self.agent_list[type(agent).__name__]:
                 self.agent_list[type(agent).__name__][agent.my_name[0]].update({agent.my_name})
@@ -68,29 +80,31 @@ class Channel(metaclass=CommsMultiton):
             self.agent_list[type(agent).__name__] = {agent.my_name[0] : {agent.my_name}}
             self._agents[agent.my_name] = agent
         
-        self.print(f'Connecting agent {type(agent).__name__}:{agent.my_name}') if self.full_log else ...
+        self.print(f'Connecting agent {type(agent).__name__}:{agent.my_name}') if self.show_exec else ...
 
             
-    def _rm_agents(self, agents):
-        try:
+    def _rm_agents(self, agents: Union[list['Agent'],'Agent']):
+        if isinstance(agents, list):
             for agent in agents:
                 self._rm_agent(agent)
-        except TypeError:
+        else:
             self._rm_agent(agents)
 
-    def _rm_agent(self, agent):
+    def _rm_agent(self, agent: 'Agent'):
+        assert isinstance(agent.my_name, tuple)
         if agent.my_name in self._agents:
             del self._agents[agent.my_name]
             del self.agent_list[type(agent).__name__][agent.my_name[0]]
         self.print(
             f"Desconnecting agent {type(agent).__name__}:{agent.my_name}"
-        ) if self.full_log else ...
+        ) if self.show_exec else ...
 
-    def _send(self, sender, target, act, message):  
-        if type(act) == TypeVar: act = act.__name__ 
+    def _send(self, sender: tuple, target: Union[Agt_name, Iterable[Agt_name], broadcast], act: ACT | str, message: Union[str, 'Belief', 'Goal', 'Ask', 'Plan'] | list[Union[str, 'Belief', 'Goal', 'Plan']]):  
+        if type(act) == TypeVar: 
+            act = act.__name__ 
         
         messages = []
-        if type(message) == Iterable:
+        if isinstance(message, list):
             for m in message:
                 messages.append(self.parse_sent_msg(sender,act,m))
         else:
@@ -100,14 +114,15 @@ class Channel(metaclass=CommsMultiton):
             if type(target) == Iterable:
                 for trgt in target:
                     self._sending(sender,trgt,act,msg)
-            elif target == broadcast:
+            elif is_broadcast(target):
                 for agent_name in self._agents.keys():
-                    self._sending(sender,agent_name,act,msg)
+                    if agent_name != sender:
+                        self._sending(sender,agent_name,act,msg)
             else:
                 self._sending(sender,target,act,msg)
     
     def _sending(self, sender, target, act, msg):
-        self.print(f"{sender} sending {act}:{msg} to {target}") if self.full_log else ...        
+        self.print(f"{sender} sending {act}:{msg} to {target}") if self.show_exec else ...        
     
         try:         
             self._agents[target].save_msg(act,msg)
@@ -115,7 +130,7 @@ class Channel(metaclass=CommsMultiton):
             self.print(f"Agent {target} not connected")
     
     def parse_sent_msg(self,sender, act, msg):
-        from maspy.agent import Belief, Goal, Ask, Plan
+        from maspy.agent import Belief, Goal, Ask
         if type(msg) in {Belief, Goal} and msg is not None:
             msg = msg.update(source=sender)
         if act in {"askOne","askAll","askHow"}:
