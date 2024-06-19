@@ -30,7 +30,6 @@ class Manager(Agent):
         self.add(Belief("spotPrice",rnd.randint(12,20),adds_event=False))
         self.add(Belief("minPrice",rnd.randint(6,10),adds_event=False))
 
-    
     @pl(gain,Goal("sendPrice"),Belief("spotPrice","SP"))
     def send_price(self,src,spot_price):
         self.send(src,achieve,Goal("checkPrice",spot_price),"Parking")
@@ -70,6 +69,7 @@ class Driver(Agent):
     
     @pl(gain,Goal("park"))
     def ask_price(self,src):
+        self.print("Requesting price")
         self.send("Manager",achieve,Goal("sendPrice"),"Parking")
     
     @pl(gain,Goal("checkPrice","Price"),Belief("budget",("WantedPrice","MaxPrice")))
@@ -107,12 +107,15 @@ class Driver(Agent):
     
         
 if __name__ == "__main__":
+    #Admin().set_logging(full_log=True)
     park = Parking()
     park_ch = Channel("Parking")
     manager = Manager()
     driver_list = []
-    for _ in range(6):
+    for _ in range(5):
         driver_list.append(Driver("Drv"))
+    #driver_list[0].show_cycle = True
+    #driver_list[0].sleep = 1
     Admin().connect_to(manager, [park,park_ch])
     Admin().connect_to(driver_list, park_ch)
     Admin().start_system()

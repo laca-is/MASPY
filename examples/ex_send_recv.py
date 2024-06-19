@@ -8,10 +8,10 @@ class Sample(Agent):
     
     @pl(gain,Goal("send_info","Msg"),Belief("sender"))
     def send_info(self, src, msg):
-        agents_list = self.find_in("Sample","Channel")["Receiver"]
+        agents_list = self.find_in(["Sample","Receiver"],"Channel")
         for agent in agents_list:
             self.print(f"Sending> {msg} to {agent}")
-            self.send(agent,achieve,Goal("receive_info",(msg,)))
+            self.send(agent,achieve,Goal("receive_info",msg))
             
         agents_list = self.find_in("Test","Channel")["Test"]
         for agent in agents_list:
@@ -32,7 +32,7 @@ class Test(Agent):
     
 
 if __name__ == "__main__":
-    Channel().full_log = True
+    Channel().show_exec = True
     t = Test("Test")
     t.add(Goal("print"))
     sender = Sample("Sender")    

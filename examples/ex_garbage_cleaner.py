@@ -14,7 +14,7 @@ class Room(Environment):
 
 class Robot(Agent):
     def __init__(self, name, initial_env=None, full_log=False):
-        super().__init__(name, full_log=full_log)
+        super().__init__(name, show_exec=full_log)
         self.connect_to(initial_env)
         self.add(Goal("decide_move"))
         self.add(Belief("room_is_dirty"))
