@@ -187,7 +187,7 @@ from maspy import *
 
 class Manager(Agent):
     def __init__(self, agt_name=None):
-        super().__init__(agt_name,full_log=False,show_cycle=False)
+        super().__init__(agt_name,show_exec=False,show_cycle=False)
         self.add(Belief("spotPrice",rnd.randint(12,20),adds_event=False))
 
     @pl(gain,Goal("sendPrice"),Belief("spotPrice","SP"))
@@ -197,7 +197,7 @@ class Manager(Agent):
 
 class Driver(Agent):
     def __init__(self, agt_name=None):
-        super().__init__(agt_name,full_log=False,show_cycle=False)
+        super().__init__(agt_name,show_exec=False,show_cycle=False)
         self.add(Belief("budget",(rnd.randint(6,10),rnd.randint(12,20)),adds_event=False))
         self.add(Goal("park"))
     
@@ -306,7 +306,7 @@ class SimpleAgent(Agent):
         self.action("SimpleEnv").env_act(self.my_name,src)
 
 if __name__ == "__main__":
-    Admin().set_logging(full_log=True)
+    Admin().set_logging(show_exec=True)
     agent1 = SimpleAgent()
     agent2 = SimpleAgent()
     env = SimpleEnv()
@@ -596,7 +596,7 @@ Admin().connect_to(agents: Iterable[Agent] | Agent,
 """
 Sets the logging configuration for the whole system
 Args:
-    full_log: bool: Whether to show execution logs
+    show_exec: bool: Whether to show execution logs
     show_cycle: bool: Whether to show reasoning cycle logs
     show_prct: bool: Whether to show perception logs
     show_slct: bool: Whether to show selection of plans logs
@@ -604,7 +604,7 @@ Args:
 Returns:
     None
 """ 
-Admin().set_logging(full_log: bool, show_cycle: bool=False,
+Admin().set_logging(show_exec: bool, show_cycle: bool=False,
                 show_prct: bool=False, show_slct: bool=False, 
                 set_admin=True, set_agents=True,
                 set_channels=True, set_environments=True)
