@@ -34,6 +34,13 @@ To update your already installed version of MASPY to the latest one, you can use
 The minimum version of `Python` guarateed to work is 3.10, altough earlier 
 versions may work.
 
+## Latest changes
+
+	- Better typing for library functions
+	- Fixed perception speed
+	- Fixed ending multiple agents problem
+	- Better agent finder
+
 ## Using MASPY
 
 ### Import
