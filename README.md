@@ -35,7 +35,7 @@ The minimum version of `Python` guarateed to work is 3.10, altough earlier
 versions may work.
 
 ## Latest changes
-
+	maspy-v0.2.0:
 	- Better typing for library functions
 	- Fixed perception speed
 	- Fixed ending multiple agents problem
