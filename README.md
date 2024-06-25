@@ -37,9 +37,9 @@ versions may work.
 ## Latest changes
 	maspy-v0.2.1:
 	- New internal function to perceive environments during plans
-	- Correction of the problem of overwriting beliefs perceived in the environment
-	- Better error explainations for debbuging
-	- More consive logging of system
+	- Fixed problem of overwriting perceived beliefs of the environment
+	- Better error explanations for debugging
+	- More concise system logging
  
 	maspy-v0.2.0:
 	- Better typing for library functions
