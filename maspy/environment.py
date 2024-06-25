@@ -49,6 +49,12 @@ class Percept:
 
         return hash((self.key, args_tuple, self.group))
 
+    def __str__(self) -> str:
+        return f"Percept{self.key,self._args}"
+    
+    def __repr__(self):
+        return self.__str__()
+
 @dataclass
 class Model:
     actions: list
@@ -91,7 +97,7 @@ class Environment(metaclass=EnvironmentMultiton):
     def print(self,*args, **kwargs):
         return print(f"{self._name}>",*args,**kwargs)
     
-    def perception(self):
+    def perception(self) -> dict[str, Dict[str, Set[Percept]]]:
         return manual_deepcopy(self._percepts)
 
     @property
@@ -176,7 +182,12 @@ class Environment(metaclass=EnvironmentMultiton):
     def change(self, old_percept:Percept, new_args:Percept.args):
         if type(new_args) is not tuple: 
             new_args = (new_args,) 
-        old_percept._args = new_args
+        if old_percept.args_len > 0:
+            percept = self.get(old_percept)
+        else:
+            percept = self.get(old_percept,ck_args=False)
+        if isinstance(percept, Percept):
+            percept._args = new_args
             
     def _percept_exists(self, key, args, group=DEFAULT_GROUP) -> bool:
         if type(args) is not tuple: 
@@ -184,11 +195,14 @@ class Environment(metaclass=EnvironmentMultiton):
         return Percept(key,args,group) in self._percepts[group][key]
 
     def delete(self, percept: list[Percept] | Percept):
-        if isinstance(percept, list):
-            for prcpt in percept:
-                self._percepts[prcpt.group][prcpt.key].remove(prcpt)
-        else:
-            self._percepts[self._my_name][percept.key].remove(percept)
+        try:
+            if isinstance(percept, list):
+                for prcpt in percept:
+                    self._percepts[prcpt.group][prcpt.key].remove(prcpt)
+            else:
+                self._percepts[self._my_name][percept.key].remove(percept)
+        except KeyError:
+            self.print(f'Percept {percept} couldnt be deleted')
               
     def _clean(self, percept_data: Iterable[Percept] | Percept) -> Dict:
         match percept_data:

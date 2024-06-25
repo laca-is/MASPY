@@ -99,7 +99,7 @@ class Channel(metaclass=CommsMultiton):
             f"Desconnecting agent {type(agent).__name__}:{agent.my_name}"
         ) if self.show_exec else ...
 
-    def _send(self, sender: tuple, target: Union[Agt_name, Iterable[Agt_name], broadcast], act: ACT | str, message: Union[str, 'Belief', 'Goal', 'Ask', 'Plan'] | list[Union[str, 'Belief', 'Goal', 'Plan']]):  
+    def _send(self, sender: tuple, target: Union[Agt_name, Iterable[Agt_name], broadcast], act: ACT | str, message: Union[str, 'Belief', 'Goal', 'Ask', 'Plan'] | list[Union[str, 'Belief', 'Ask', 'Goal', 'Plan']]):  
         if type(act) == TypeVar: 
             act = act.__name__ 
         
@@ -109,25 +109,39 @@ class Channel(metaclass=CommsMultiton):
                 messages.append(self.parse_sent_msg(sender,act,m))
         else:
             messages.append(self.parse_sent_msg(sender,act,message))
-
-        for msg in messages:
-            if type(target) == Iterable:
-                for trgt in target:
-                    self._sending(sender,trgt,act,msg)
-            elif is_broadcast(target):
-                for agent_name in self._agents.keys():
-                    if agent_name != sender:
-                        self._sending(sender,agent_name,act,msg)
-            else:
-                self._sending(sender,target,act,msg)
+        try:
+            for msg in messages:
+                if type(target) == Iterable:
+                    for trgt in target:
+                        self._sending(sender,trgt,act,msg)
+                elif is_broadcast(target):
+                    for agent_name in self._agents.keys():
+                        if agent_name != sender:
+                            self._sending(sender,agent_name,act,msg)
+                else:
+                    self._sending(sender,target,act,msg)
+        except AssertionError:
+            raise
     
     def _sending(self, sender, target, act, msg):
         self.print(f"{sender} sending {act}:{msg} to {target}") if self.show_exec else ...        
-    
-        try:         
+
+        from maspy.agent import Belief, Goal, Ask, Plan
+        try:
+            match act:
+                case "tell"|"untell": 
+                    assert isinstance(msg, Belief),f'Act {act} must send Belief'
+                case "achieve"|"unachieve": 
+                    assert isinstance(msg, Goal),f'Act {act} must send Goal'
+                case "askOne"|"askAll"|"askHow": 
+                    assert isinstance(msg, Ask),f'Act {act} must send Ask' 
+                case "tellHow"|"untellHow": 
+                    assert isinstance(msg, Plan),f'Act {act} must send Plan'
             self._agents[target].save_msg(act,msg)
         except KeyError:
             self.print(f"Agent {target} not connected")
+        except AssertionError:
+            raise
     
     def parse_sent_msg(self,sender, act, msg):
         from maspy.agent import Belief, Goal, Ask

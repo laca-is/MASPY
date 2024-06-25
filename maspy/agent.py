@@ -14,6 +14,8 @@ from collections.abc import Iterable, Callable
 from time import sleep
 import importlib as implib
 import inspect
+import traceback
+import sys
 
 gain = TypeVar('gain')
 lose = TypeVar('lose')
@@ -96,6 +98,9 @@ class Belief:
     
     def __str__(self) -> str:
         return f"Belief{self.key,self.args,self.source}"
+    
+    def __repr__(self):
+        return self.__str__()
 
 @dataclass
 class Goal:
@@ -169,18 +174,24 @@ class Goal:
     def __str__(self) -> str:
         return f"Goal{self.key,self.args,self.source}"
     
+    def __repr__(self):
+        return self.__str__()
+    
 @dataclass
 class Event:
     change: str | TypeVar
     data: Belief | Goal 
-    intention: str = "" # still don't understand how it works
+    intention: str = "" # not implemented
     
     def __post_init__(self):
         if type(self.change)==TypeVar: 
             self.change = self.change.__name__ 
     
     def __str__(self) -> str:
-        return f"Event{self.change,self.data,self.intention}"
+        return f"Event({self.change}, {self.data})"
+    
+    def __repr__(self):
+        return self.__str__()
     
 @dataclass
 class Plan:
@@ -189,7 +200,10 @@ class Plan:
     body: Callable = lambda _: {}
     
     def __str__(self) -> str:
-        return f"Plan{self.trigger,self.context,self.body.__name__}"
+        return f"Plan({self.trigger}, {self.context}, {self.body.__name__}() )"
+    
+    def __repr__(self):
+        return self.__str__()
     
 @dataclass
 class Ask:
@@ -197,7 +211,7 @@ class Ask:
     reply: list = field(default_factory=list)
     source: str = "unknown"
 
-MSG = Belief | Ask | Goal | Plan
+MSG = Belief | Ask | Goal | Plan | List[Belief | Ask | Goal | Plan]
 
 _type_env_set = {Environment, "environment", "envrmnt", "env"}
 _type_ch_set = {Channel, "channel", "chnnl", "ch", "c"}
@@ -241,7 +255,7 @@ class Agent:
         log_type = "Default",
         instant_mail = False
     ):              
-        self.full_log = show_exec
+        self.show_exec = show_exec
         self.show_cycle = show_cycle
         self.show_prct = show_prct
         self.show_slct = show_slct
@@ -251,10 +265,10 @@ class Agent:
         self.my_name: Optional[str | tuple] = name
         Admin().add_agents(self)
         
-        self.sleep: Optional[int|float] = None
-        self.stop_flag = None
+        self.delay: Optional[int|float] = None
+        self.stop_flag: threading.Event | None = None
         self.running = False
-        self.thread = None
+        self.thread: threading.Thread | None = None
         self.saved_msgs: List = []
         
         self._ml_models: List = []
@@ -350,35 +364,39 @@ class Agent:
     def get_env(self, env_name: str):
         return self._environments[env_name]
     
-    def add_plan(self, plan: List[Plan] | Plan):
+    def add_plan(self, plan: list[Plan] | Plan):
         plans = self._clean_plans(plan)
         self._plans += plans
 
     def rm_plan(self, plan: Plan):
         self._plans.remove(plan)
     
-    def _new_event(self,change: str,data: Belief | Goal | Iterable[Belief | Goal],intention=None):
+    def _new_event(self,change: str,data: Belief | Goal | Iterable[Belief | Goal], intention=None):
         if isinstance(data, Iterable):
             for dt in data:
                 if isinstance(dt,Belief) and not dt.adds_event: 
                     continue
-                self.print(f"New Event: {change}:{dt}")  if self.full_log else ...
+                self.print(f"New Event: {change},{dt}")  if self.show_exec else ...
                 self.__events.append(Event(change,dt,intention))
         else:
-            assert isinstance(data, Belief | Goal), f"Unexpected {type(data)}"
+            assert isinstance(data, Belief | Goal)
             if isinstance(data,Belief) and not data.adds_event: 
                 return
-            self.print(f"New Event: {change}:{data}")  if self.full_log else ...
+            self.print(f"New Event: {change},{data}")  if self.show_exec else ...
             self.__events.append(Event(change,data,intention))
     
-    def _get_type_base(self, data_type):
-        if data_type == Belief:
+    def _get_type_base(self, 
+            data_type: Belief | Goal | Plan | Event
+        ) -> Union[dict[str, dict[str, set[Belief]]],
+                dict[str, dict[str, set[Goal]]],
+                list[Plan], list[Event]] | None:
+        if isinstance(data_type,Belief) or data_type == Belief:
             return self.__beliefs
-        elif data_type == Goal:
+        elif isinstance(data_type,Goal) or data_type == Goal:
             return self.__goals
-        elif data_type == Plan:
+        elif isinstance(data_type,Plan) or data_type == Plan:
             return self._plans
-        elif data_type == Event:
+        elif isinstance(data_type,Event) or data_type == Event:
             return self.__events
         else:
             print(f"Type is neither Belief | Goal | Plan | Event : {data_type}")
@@ -386,26 +404,29 @@ class Agent:
     
     def add(self, data_type: Belief | Goal | Iterable[Belief | Goal]):
         
-        self.print(f"Adding {data_type}") if self.full_log else ...
+        self.print(f"Adding {data_type}") if self.show_exec else ...
         cleaned_data = self._clean(data_type)
         
         for type_data, data in cleaned_data.items():
             if len(data) == 0: 
                 continue
             type_base = self._get_type_base(type_data)
-            merge_dicts(data,type_base)
+            if isinstance(type_base,dict):
+                merge_dicts(data,type_base)
             
         self._new_event("gain",data_type)
                  
     def rm(self, data_type: Belief | Goal | Iterable[Belief | Goal]):
-        self.print(f"Removing {data_type}") if self.full_log else ...
+        self.print(f"Removing {data_type}") if self.show_exec else ...
         
         if not isinstance(data_type, Iterable): 
             data_type = [data_type]
             
         for typ in data_type:
-            type_base = self._get_type_base(type(typ))
-            type_base[typ.source][typ.key].remove(typ)
+            type_base = self._get_type_base(typ)
+            assert isinstance(typ, Belief | Goal), f"\nUnexpected type {type(typ)}, expected Belief | Goal"
+            assert isinstance(type_base,dict), f'\nUnexpected type {type(type_base)}, expected dict'
+            type_base[typ.source][typ.key].remove(typ) # type: ignore
         
         self._new_event("lose",data_type)
 
@@ -417,16 +438,19 @@ class Agent:
         all = False, ck_chng=True, ck_type=True, ck_args=True, ck_src=True
     ) -> List[Belief | Goal | Plan | Event] | Belief | Goal | Plan | Event | None:
         if type(data_type) is type: 
-            data_type = data_type(0,0,0)
-        type_base = self._get_type_base(type(data_type))
+            data_type = data_type("_")
+        type_base = self._get_type_base(data_type)
+        if type_base is None:
+            return None
         if search_with is None: 
             search_with = data_type
 
         change, data = self._to_belief_goal(search_with)
         
-        found_data = []
+        found_data: list[Belief | Goal | Plan | Event] = []
         match data_type:
-            case Belief() | Goal(): 
+            case Belief() | Goal():  
+                assert isinstance(type_base, dict)
                 for keys in type_base.values():
                     for values in keys.values():
                         for value in values:
@@ -436,6 +460,7 @@ class Agent:
                                     return value                
             case Plan() | Event(): 
                 for plan_event in type_base:
+                    assert isinstance(plan_event, Plan | Event)
                     chng, belf_goal = self._to_belief_goal(plan_event)
                     
                     if change and ck_chng and chng != change:
@@ -446,8 +471,21 @@ class Agent:
                             return plan_event
             case _: 
                 pass
-            
-        return found_data if found_data else None
+        if found_data:
+            return found_data  
+        else:
+            current_frame = inspect.currentframe()
+            assert current_frame is not None
+            caller_frame = current_frame.f_back
+            assert caller_frame is not None
+            caller_function_name = caller_frame.f_code.co_name
+            if caller_function_name in {'_retrieve_plans','recieve_msg','_select_plan'}:
+                return None
+            if data_type == search_with:
+                self.print(f'Unable to get {type(data_type).__qualname__} like {data_type} during {caller_function_name}()')
+            else:
+                self.print(f'Unable to get {type(data_type).__qualname__} like {search_with} during {caller_function_name}()')
+            return None
 
     def _to_belief_goal(self, data_type: Belief | Goal | Plan | Event):
         change: Optional[str | TypeVar] = None
@@ -466,21 +504,21 @@ class Agent:
                 return None, None
         return change,belief_goal
     
-    def _compare_data(self, data1, data2, ck_type,ck_args,ck_src):
-        self.print(f"Comparing: \n\t{data1} and {data2}") if self.show_slct else ...
+    def _compare_data(self, data1: Belief | Goal, data2: Belief | Goal, ck_type: bool, ck_args: bool, ck_src: bool):
+        buffer = f"Comparing: {data1}  &  {data2}"
         if ck_type and type(data1) != type(data2):
-            self.print("Failed at type") if self.show_slct else ...
+            self.print(f"{buffer} >> Different type") if self.show_slct else ...
             return False
         if data1.key != data2.key:
-            self.print("Failed at key") if self.show_slct else ...
+            self.print(f"{buffer} >> Different key") if self.show_slct else ...
             return False
         if ck_src and data2.source != DEFAULT_SOURCE and data1.source != data2.source:
-            self.print("Failed at source") if self.show_slct else ...
+            self.print(f"{buffer} >> Different source") if self.show_slct else ...
             return False
         if not ck_args:
             return True
         if data1.args_len != data2.args_len:
-            self.print("Failed at args_len") if self.show_slct else ...
+            self.print(f"{buffer} >> Different args length") if self.show_slct else ...
             return False
         for arg1,arg2 in zip(data1._args,data2._args):
             if isinstance(arg1,str) and (arg1[0].isupper()):
@@ -491,27 +529,45 @@ class Agent:
             elif arg1 == arg2:
                 continue
             else:
-                self.print(f"Failed at args {arg1} x {arg2}") if self.show_slct else ...
+                self.print(f"{buffer} >> Different args {arg1} x {arg2}") if self.show_slct else ...
                 return False
         else:
-            self.print("Data is Compatible") if self.show_slct else ...
+            self.print(f"{buffer} >> Compatible") if self.show_slct else ...
             return True
                       
     def _run_plan(self, plan: Plan, trigger: Belief | Goal, args: tuple):
-        self.print(f"Running {plan}")  if self.full_log or self.show_cycle else ...
+        self.print(f"Running {plan}")  if self.show_exec or self.show_cycle else ...
         try:
-            #self.print(f'running with {trigger._args} {args}')
             return plan.body(self, trigger.source, *trigger._args, *args)
-        except KeyError as e:
-            self.print(f"{plan} doesn't exist {repr(e)}")
-            raise RunPlanError
+        except Exception as e:
+            self.print(f"Error while executing {plan}:\n\ttrigger={trigger}  |  args={args}  |  Error={repr(e)}")
+            _, _, exc_traceback = sys.exc_info()
+            tb_entries = traceback.extract_tb(exc_traceback)
+            
+            excluded_files = ['agent.py', 'communication.py', 'admin.py', 'environment.py']
+            
+            filtered_entries = [
+                entry for entry in tb_entries 
+                if not any(excluded_file in entry.filename for excluded_file in excluded_files)
+            ]
+            
+            if filtered_entries:
+                buffer = "  Filtered Traceback (most recent call last):\n"
+                for entry in filtered_entries:
+                    buffer +=f'  File "{entry.filename}", line {entry.lineno}, in {entry.name}\n'
+                    if entry.line:
+                        buffer += f'    {entry.line}'
+                print(buffer)
+            else:
+                print("No matching traceback entries found.")
+            exit(1) 
 
     # TODO: implement stoping plan
     def _stop_plan(self, plan):
-        self.print(f"Stoping {plan})")  if self.full_log else ...
+        self.print(f"Stoping {plan})")  if self.show_exec else ...
         pass
     
-    def send(self, target: str | tuple | List, act: TypeVar, msg: MSG | str, channel: str = DEFAULT_CHANNEL):  
+    def send(self, target: str | tuple | List, act: TypeVar, msg: MSG, channel: str = DEFAULT_CHANNEL):  
         if isinstance(target,str): 
             target = (target,1) 
         try:
@@ -519,42 +575,64 @@ class Agent:
             self._channels[channel]._send(self.my_name,target,act,msg)
         except KeyError:
             self.print(f"Not Connected to Selected Channel:{channel}")
+        except AssertionError:
+            raise
     
-    def save_msg(self, act, msg):
+    def save_msg(self, act: TypeVar | str, msg: MSG) -> None:
         if self.instant_mail: 
-            self.recieve_msg(act,msg)
+            try:
+                self.recieve_msg(act,msg)
+            except AssertionError:
+                raise
         else:
             self.saved_msgs.append((act,msg))
 
-    def _mail(self, selection_function="ALL"):
-        if selection_function not in {None,"ALL"}:
+    def _mail(self, selection_function: str | Callable | None = "ALL") -> None:
+        if callable(selection_function):
             selection_function(self.saved_msgs)
         else:
             while self.saved_msgs:
                 act,msg = self.saved_msgs.pop()
-                self.recieve_msg(act,msg)
+                try:
+                    self.recieve_msg(act,msg)
+                except AssertionError as ae:
+                    print(f"\t{repr(ae)}")
+                    exc_type, exc_value, exc_traceback = sys.exc_info()
+                    last_frame = traceback.extract_tb(exc_traceback)[-1]
+        
+                    # Format the last frame
+                    formatted_last_frame = f"File \"{last_frame.filename}\", line {last_frame.lineno}, in {last_frame.name}\n  {last_frame.line}"
+                    
+                    # Print the formatted last frame
+                    print("Error originated from:")
+                    print(formatted_last_frame)
                 if selection_function != "ALL":
                     break
 
-    def recieve_msg(self, act, msg: MSG):
+    def recieve_msg(self, act: TypeVar | str, msg: MSG) -> None:
         #self.print(f"Received from {sender} : {act} -> {msg}")  if self.full_log else ...
         match act:
-            case "tell" | "achieve":
-                assert isinstance(msg, Belief | Goal)
+            case "tell":
+                assert isinstance(msg, Belief),f'Act tell must receive Belief not {type(msg).__qualname__}'
                 self.add(msg)
-
-            case "untell" | "unachieve":
-                assert isinstance(msg, Belief | Goal)
+            case "achieve":
+                assert isinstance(msg, Goal),f'Act achieve must receive Goal not {type(msg).__qualname__}'
+                self.add(msg)
+            case "untell":
+                assert isinstance(msg, Belief),f'Act untell must receive Belief not {type(msg).__qualname__}'
+                self.rm(msg)
+            case "unachieve":
+                assert isinstance(msg, Goal),f'Act unachieve must receive Goal not {type(msg).__qualname__}'
                 self.rm(msg)
 
             case "askOne":
-                assert isinstance(msg, Ask)
+                assert isinstance(msg, Ask), f'Act askOne must request an Ask not {type(msg).__qualname__}'
                 found_data = self.get(msg.data_type,ck_src=False)
                 assert isinstance(found_data, Belief)
                 self.send(msg.source, TypeVar('tell'), found_data)
 
             case "askAll":
-                assert isinstance(msg, Ask)
+                assert isinstance(msg, Ask), f'Act askAll must request an Ask not {type(msg).__qualname__}'
                 found_data = self.get(msg.data_type,all=True,ck_src=False)
                 assert isinstance(found_data, list)
                 for data in found_data:
@@ -562,15 +640,15 @@ class Agent:
                     self.send(msg.source, TypeVar('tell'), data)
 
             case "tellHow":
-                assert isinstance(msg, Plan)
+                assert isinstance(msg, Plan), f'Act tellHow must receive a Plan not {type(msg).__qualname__}'
                 self.add_plan(msg)
 
             case "untellHow":
-                assert isinstance(msg, Plan)
+                assert isinstance(msg, Plan), f'Act untellHow must receive a Plan not {type(msg).__qualname__}'
                 self.rm_plan(msg)
 
             case "askHow":
-                assert isinstance(msg, Ask)
+                assert isinstance(msg, Ask), f'Act askHow must request an Ask not {type(msg).__qualname__}'
                 found_plans = self.get(Plan(Event(TypeVar(''),msg.data_type)),all=True,ck_chng=False)
                 assert isinstance(found_plans, list)
                 for plan in found_plans:
@@ -578,10 +656,6 @@ class Agent:
                     self.send(msg.source, TypeVar('tellHow'), plan)
             case _:
                 TypeError(f"Unknown type of message {act}:{msg}")
-    
-    def finder(self, *args) :
-        
-        return None
     
     def find_in(self, 
             agent_name: str | list[str], 
@@ -618,11 +692,9 @@ class Agent:
             case _:
                 return None
             
-            
-    def action(self,env_name) -> Environment | None:
+    def action(self,env_name:str) -> Environment | None:
         try:
             env = self._environments[env_name]
-            #print(f"\n {env}   {Environment(env_name)}")
             return env
         except KeyError:
             self.print(f"Not Connected to Environment:{env_name}")
@@ -631,20 +703,20 @@ class Agent:
     def send_msg(self, target: str, act: str, msg: MSG, channel: str):
         pass
 
-    def reasoning(self):
-        #self.print(f"Starting Reasoning")
+    def reasoning(self) -> None:
         self.running = True
         self.stop_flag = threading.Event()
         self.thread = threading.Thread(target=self.cycle,args=(self.stop_flag,))
         self.thread.start()
     
-    def stop_cycle(self):
+    def stop_cycle(self) -> None:
         self.print("Shutting Down...")
+        assert self.stop_flag is not None
         self.stop_flag.set()
         self.paused_agent = True
         self.running = False
             
-    def cycle(self, stop_flag):
+    def cycle(self, stop_flag: threading.Event) -> None:
         while not stop_flag.is_set():   
             self.print("#### New cycle ####") if self.show_cycle else ...
             self._perception()   
@@ -659,22 +731,48 @@ class Agent:
             if stop_flag.is_set():
                 break
             _ = self._execute_plan(chosen_plan,event,args)
-            if self.sleep: 
-                sleep(self.sleep)
+            if self.delay: 
+                sleep(self.delay)
 
-    def _strategy(self):
-        for model_name in self._learning_models:
-            self.print(f"Updating strategies '{model_name}'") if self.show_cycle else ...
-            strategy = self._learning_models[model_name].strategy()
-            self.strategies[model_name] = strategy 
+    # def _strategy(self) -> None:
+    #     for model_name in self._learning_models:
+    #         self.print(f"Updating strategies '{model_name}'") if self.show_cycle else ...
+    #         strategy = self._learning_models[model_name].strategy()
+    #         self.strategies[model_name] = strategy 
     
-    def _perception(self):
-        percept_dict = dict()
+    def _perception(self) -> None:
+        percept_dict: dict[str, dict] = dict()
         for env_name in self._environments:
-            self.print(f"Percepting '{env_name}'") if self.show_cycle else ...
-            percept_dict.update(self._environments[env_name].perception())
-        percept_dict = self._percepts_to_beliefs(percept_dict)
-        self._revise_beliefs(percept_dict)
+            self.print(f"Percepting '{env_name}'") if self.show_cycle and not self.show_prct else ...
+            percepts = self._environments[env_name].perception()
+            self.print(f"Percepting {env_name} : {percepts}") if self.show_prct else ...
+            merge_dicts(percepts,percept_dict)
+        belief_dict: dict[str, Dict[str, Set[Belief]]] = self._percepts_to_beliefs(percept_dict)
+        self._revise_beliefs(belief_dict)
+    
+    def perceive(self, env_name: str | list[str]) -> None:
+        if env_name == "all":
+            self._perception()
+            return
+        
+        percept_dict: dict[str, dict] = dict()
+        if isinstance(env_name, list):
+            for name in env_name:
+                try:
+                    percepts = self._environments[name].perception()
+                    self.print(f"Percepting '{name}'") if not self.show_prct else self.print(f"Percepting '{name}'")
+                    merge_dicts(percepts,percept_dict)
+                except KeyError:
+                    self.print(f"Not Connected to Environment:{name}")
+        else:
+            try:
+                percept_dict = self._environments[env_name].perception()
+                self.print(f"Percepting '{env_name}'") if not self.show_prct else self.print(f"Percepting '{env_name}' : {percept_dict}")
+            except KeyError:
+                self.print(f"Not Connected to Environment:{env_name}")
+        
+        belief_dict = self._percepts_to_beliefs(percept_dict)
+        self._revise_beliefs(belief_dict)
     
     def _percepts_to_beliefs(self,percepts: dict) -> dict:
         # TODO make use of percepts group
@@ -686,79 +784,85 @@ class Agent:
                 percepts[source][key] = belief_set
         return percepts
      
-    def _revise_beliefs(self, percept_dict: dict):
+    def _revise_beliefs(self, belief_dict: dict[str, Dict[str, Set[Belief]]]) -> None:
         for source, keys in self.__beliefs.copy().items():
             if source == DEFAULT_SOURCE: 
                 continue # Does not remove "self"
             if type(source) == tuple: 
                 continue # Does not remove messages
-            if source in percept_dict:
+            if source in belief_dict:
                 for key, beliefs in keys.copy().items():
-                    if key in percept_dict[source]: 
-                        new, gain, lose = set_changes(beliefs,percept_dict[source][key])
+                    if key in belief_dict[source]: 
+                        new, gain, lose = set_changes(beliefs,belief_dict[source][key])
                         self.__beliefs[source][key] = new
                         self._new_event("gain",gain) # Gained new specific belief
                         self._new_event("lose",lose) # Lost an old specific belief
-                        del percept_dict[source][key]
-                        if self.show_prct:
-                            self.print(f"Beliefs gained in revision: {gain}")
-                            self.print(f"Beliefs lost in revision: {lose}") 
+                        del belief_dict[source][key]
+                        if self.show_prct and gain:
+                            self.print(f"Specific Beliefs gained in revision: {gain}")
+                        if self.show_prct and lose:
+                            self.print(f"Specific Beliefs lost in revision: {lose}") 
                     else:
                         self._new_event("lose",self.__beliefs[source][key]) # Lost whole key belief
-                        self.print(f"Beliefs lost in revision: {self.__beliefs[source][key]}") if self.show_prct else ...
+                        self.print(f"Key Beliefs lost in revision: {self.__beliefs[source][key]}") if self.show_prct else ...
                         del self.__beliefs[source][key]
                         
-                if percept_dict[source] == {}:
-                    del percept_dict[source]
+                if belief_dict[source] == {}:
+                    del belief_dict[source]
             else:
                 for beliefs in keys.values():
-                    self.print(f"Beliefs lost in revision: {beliefs}") if self.show_prct else ...
+                    self.print(f"{source} Beliefs lost in revision: {beliefs}") if self.show_prct and beliefs else ...
                     self._new_event("lose",beliefs) # Lost whole source of belief (env)
                 del self.__beliefs[source]
         
-        for keys in percept_dict.values():
+        for source,keys in belief_dict.items():
             for beliefs in keys.values():
-                self.print(f"Beliefs gained in revision: {beliefs}") if self.show_prct else ...
+                self.print(f"Rest of {source} Beliefs gained in revision: {beliefs}") if self.show_prct and beliefs else ...
                 self._new_event("gain",beliefs) # Gained beliefs of new sources/keys
-        self.__beliefs.update(percept_dict)
+                
+        self.print(f"Updating beliefs: {belief_dict}") if self.show_prct else ...
+        merge_dicts(belief_dict,self.__beliefs)
     
-    def _select_event(self):
+    def _select_event(self) -> Event | None:
         if self.__events == []: 
             return None
         return self.__events.pop(0)
     
-    def _retrieve_plans(self, event):
+    def _retrieve_plans(self, event) -> List[Plan] | None: 
         if event is None: 
             return None
-        return self.get(Plan,event,all=True,ck_src=False)
+        return self.get(Plan,event,all=True,ck_src=False) # type: ignore
     
-    def _select_plan(self, plans, event:Event):
+    def _select_plan(self, plans: list[Plan] | None, event: Event | None) -> tuple[Plan, tuple] | tuple[None, tuple]:
         if plans is None:
-            self.print(f"No plans found for {event}") if self.show_cycle else ... 
-            return None, None
+            if event is not None and isinstance(event.data,Goal):
+                self.print(f"No applicable Plan found for {event}")
+            return None, tuple()
         
         args: tuple = tuple()
         for plan in plans:
-            assert isinstance(plan, Plan)
+            assert isinstance(plan, Plan), f"Unexpected Type: {type(plan)}, Expected Plan"
             for context in plan.context:
                 ctxt = self.get(context,ck_src=False)
                 if not ctxt:
                     break
-                assert isinstance(ctxt, Belief | Goal) 
+                assert isinstance(ctxt, Belief | Goal), f"Unexpected Context Type: {type(ctxt)}, Expected Belief | Goal" 
                 for x in ctxt._args:
                     args += (x,)
             else:    
                 return plan, args
-        self.print(f"Found no applicable plan for {event.change}:{event.data}") if self.full_log else ...
-        return None, None
+        self.print(f"Found no applicable plan for {event.change}:{event.data}") if self.show_exec and event is not None else ...
+        return None, tuple()
     
-    def _execute_plan(self, chosen_plan:Plan, event: Event, args):
+    def _execute_plan(self, chosen_plan: Plan | None, event: Event | None, args: tuple[Any, ...]) -> Any | None:
         if not chosen_plan:
             return None
         try:
+            assert event is not None
             return self._run_plan(chosen_plan,event.data,args)
         except RunPlanError:
             self.print(f"{chosen_plan} failed")
+            return None
 
     # TODO: should invalid arguments be an error or a warning?
     def _clean(

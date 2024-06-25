@@ -71,7 +71,7 @@ class Admin(metaclass=AdminMeta):
         
         self._agent_list[agent.my_name] = type(agent).__name__
         self._agents[agent.my_name] = agent
-        agent.full_log = self.agt_sh_exec
+        agent.show_exec = self.agt_sh_exec
         agent.show_cycle = self.agt_sh_cycle
         agent.show_prct = self.agt_sh_prct
         agent.show_slct = self.agt_sh_slct
@@ -200,4 +200,4 @@ class Admin(metaclass=AdminMeta):
 
     def slow_cycle_by(self, time: int | float) -> None:
         for agent in self._agents.values():
-            agent.sleep = time
+            agent.delay = time
