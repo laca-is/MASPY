@@ -35,7 +35,7 @@ The minimum version of `Python` guarateed to work is 3.10, altough earlier
 versions may work.
 
 ## Latest changes
-	 maspy-v0.2.1:
+	maspy-v0.2.1:
 	- New internal function to perceive environments during plans
 	- Fixed overwrting environments percieved beliefs problem
 	- Better error explainations for debbuging
