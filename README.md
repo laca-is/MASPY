@@ -500,7 +500,7 @@ ___.find_in(agent_name: str | list[str],
 Perceives the specified environment(s) and updates the agent's beliefs.
 Args:
 	env_name str or list[str]: The name of the environment or a list of environment names to perceive.
-			env_name can also receive "all" and so all connected environments are perceived.
+		env_name can also receive "all" and so all connected environments are perceived.
 Returns:
 	None:
 """
