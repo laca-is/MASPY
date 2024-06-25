@@ -37,7 +37,7 @@ versions may work.
 ## Latest changes
 	maspy-v0.2.1:
 	- New internal function to perceive environments during plans
-	- Fixed overwrting environments percieved beliefs problem
+	- Correction of the problem of overwriting beliefs perceived in the environment
 	- Better error explainations for debbuging
 	- More consive logging of system
  
