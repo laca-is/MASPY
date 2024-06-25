@@ -35,6 +35,12 @@ The minimum version of `Python` guarateed to work is 3.10, altough earlier
 versions may work.
 
 ## Latest changes
+	 maspy-v0.2.1:
+	- New internal function to perceive environments during plans
+	- Fixed overwrting environments percieved beliefs problem
+	- Better error explainations for debbuging
+	- More consive logging of system
+ 
 	maspy-v0.2.0:
 	- Better typing for library functions
 	- Fixed perception speed
@@ -489,6 +495,16 @@ ___.find_in(agent_name: str | list[str],
   	    cls_type: str = "channel",
   	    cls_name: str = "default", 
             cls_instance: Environment | Channel | None = None)
+
+"""
+Perceives the specified environment(s) and updates the agent's beliefs.
+Args:
+	env_name str or list[str]: The name of the environment or a list of environment names to perceive.
+			env_name can also receive "all" and so all connected environments are perceived.
+Returns:
+	None:
+"""
+___.perceive(env_name: str | list[str])
 
 """
 Retrieves the environment instance with the given name to make an action
