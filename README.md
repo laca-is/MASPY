@@ -36,7 +36,7 @@ versions may work.
 
 ## Latest changes
 	maspy-v0.2.2:
- 	- Removed Numpy import
+ 	- Removed Numpy necessity
   
 	maspy-v0.2.1:
 	- New internal function to perceive environments during plans
