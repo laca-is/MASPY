@@ -1,4 +1,4 @@
-# !(/main/docs/imgs/MASPY_LOGO.png)
+# ![MASPY Logo](/main/docs/imgs/MASPY_LOGO.png)
 
 *MASPY* is a `Python` library which aims to ease the development of a 
 Multi-Agent Systems based on the BDI paradigm. In this paradigm, an agent
