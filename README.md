@@ -1,6 +1,6 @@
 ![MASPY Logo](/docs/imgs/MASPY_LOGO.png)
 
-*MASPY* is a `Python` library which aims to ease the development of a 
+*MASPY* is a `Python` Framework which aims to ease the development of a 
 Multi-Agent Systems based on the BDI paradigm. In this paradigm, an agent
 will contain *Beliefs*, its knowledge, *Desire*, its wants, and
 *Intentions*, how it will achieve their wants. 
@@ -9,7 +9,7 @@ will contain *Beliefs*, its knowledge, *Desire*, its wants, and
 where the agents will act. An agent may contain any number of *Beliefs*, 
 *Objectives*, *Plans*, these to classes model desires and intentions, 
 respectively. The agent can communicate with others agents, by sending
-or requesting any of the previous entitys. This library
+or requesting any of the previous entitys. This Framework
 uses a Knowledge Query Model Language to model the communication between agents
 using acts of speech, or perfomatives, as a base model, in this way an agent can ask, tell,
 command or teach anything it needs and knows.
@@ -45,7 +45,7 @@ versions may work.
 	- More concise system logging
  
 	maspy-v0.2.0:
-	- Better typing for library functions
+	- Better typing for functions
 	- Fixed perception speed
 	- Fixed ending multiple agents problem
 	- Better agent finder
@@ -54,7 +54,7 @@ versions may work.
 
 ### Import
 
-To use the library you need this simple import  ```from maspy import *``` , nothing more or less.
+To use the Framework you need this simple import  ```from maspy import *``` , nothing more or less.
 
 Everything for ``MASPY`` to run correctly in imported this way.
 
