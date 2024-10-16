@@ -1,4 +1,5 @@
 
+# ruff: noqa
 from maspy import *
 
 class DummyAgent(Agent):

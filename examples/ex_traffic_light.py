@@ -1,3 +1,4 @@
+# ruff: noqa: F403, F405
 from maspy import *
 
 class Crossing(Environment):
@@ -5,11 +6,11 @@ class Crossing(Environment):
         super().__init__(env_name)
         self.create(Percept("traffic_light",("green",)))
     
-    def cross(self, src):
+    def cross(self, src: Agent):
         self.print(f"Agent {src.my_name} is now crossing")
 
 class Cross_Manager(Agent):
-    @pl(gain,Belief("traffic_light","Color"))
+    @pl(gain, Belief("traffic_light","Color"))
     def traffic_light(self,src,color,):
         vehicles = self.find_in("Vehicle","Env","Cross_Junction")
         for vehicle in vehicles["Vehicle"]:
@@ -28,15 +29,17 @@ class Vehicle(Agent):
     def crossing(self,src):
         self.print(f"Confirmation for crossing by {src}")
         self.action("Cross_Junction").cross(self)
-        self.print(f"Crossing Completed")
+        self.print("Crossing Completed")
         self.send(src,tell,Belief("leaving_junction"),"Crossing")
         self.stop_cycle()
 
 
 if __name__ == "__main__":
+    #Admin().set_logging(True, set_agents=True,set_channels=True)
     cross_channel = Channel("Crossing")
     cross_env = Crossing("Cross_Junction")
     cross_manager = Cross_Manager("CrossManager")
     vehicle = Vehicle("Vehicle")
     Admin().connect_to([cross_manager,vehicle],[cross_channel,cross_env])
+    vehicle.print_plans
     Admin().start_system()
