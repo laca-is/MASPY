@@ -11,3 +11,7 @@
     - drv_settings: dict = {"budget": [(<MIN_PRICE>,<MAX_PRICE>)],
                     "counter": [<COUNTER_OFFER>],
                     "wait": [<WAIT_TIME>]}
+
+## Results
+
+![MASPY Logo](/Negotiation_Results.png)
