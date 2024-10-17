@@ -14,4 +14,4 @@
 
 ## Results
 
-![MASPY Logo](/Negotiation_Results.png)
+![Results Table](AAMAS2025/Negotiation_Results.png)
