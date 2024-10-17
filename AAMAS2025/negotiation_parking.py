@@ -147,9 +147,9 @@ if __name__ == "__main__":
                     "wait": [0, 0.5, 0.7, 1, 1.5]}
     driver_list: list[Agent] = []
     for i in range(1000):
-        budget = drv_settings["budget"][i%5]
-        counter = drv_settings["counter"][(i*2)%5]
-        wait = drv_settings["wait"][(i*4)%5]
+        budget = drv_settings["budget"][i%len(drv_settings["budget"])]
+        counter = drv_settings["counter"][(i*2)%len(drv_settings["counter"])]
+        wait = drv_settings["wait"][(i*4)%len(drv_settings["wait"])]
         driver_list.append(Driver("Drv",budget,counter,wait))
 
     Admin().connect_to(manager, [park,park_ch])
