@@ -54,6 +54,12 @@ versions may work.
 	- Fixed ending multiple agents problem
 	- Better agent finder
 
+## About MASPY
+
+![MASPY CLASSES](/docs/diags/CLASSES.png)
+
+![MASPY REASONING](/docs/diags/REASONING.png)
+
 ## Using MASPY
 
 ### Import
