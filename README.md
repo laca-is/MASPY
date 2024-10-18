@@ -475,7 +475,7 @@ Args:
 Returns:
 	None
 """
-___.test(self, data_type: Belief | Goal):
+___.test(self, data_type: Belief | Goal)
 
 """
 Suspends the current plan for a given time or until a certain event is received.
@@ -509,19 +509,20 @@ ACTS = 	tell | untell |
 	tellHow | untellHow |
 	achieve | unachieve |
 	askOne | askAll | askHow
+	askOneReply | askAllReply | askHowReply
 
-MSG = Belief | Ask | Goal | Plan
+MSG = Belief | Ask | Goal | Plan | List[Belief | Ask | Goal | Plan]
 
 Sends a message to target agent or agents, optionally through a channel
 Args:
-    target - str, tuple or list: The target agent or agents to send the message to.
+    target - str or List[str]: broadcast, target agent name or agents names to send the message to.
     act - ACTS: The directive of the message.
-    msg - MSG, str: The message to send.
+    msg - MSG: The message to send.
     channel - str: The channel to send the message through. Defaults to DEFAULT_CHANNEL.
 Returns:
     None
 """
-___.send(target: str | tuple | list, act: ACTS, msg: MSG | str, channel: str = DEFAULT_CHANNEL)
+___.send(target: str | List[str], act: ACTS, msg: MSG, channel: str = DEFAULT_CHANNEL)
 
 """
 Finds another agent's name also connected in an Environment or Channel
@@ -559,6 +560,60 @@ Returns:
     Environment or None: The retrieved environment or None found.
 """
 ___.action(env_name: str)
+
+"""
+Stops and Removes all intentions and events from the intention and event list that both contains the given data_type.
+Args:
+	data_type: The data type to remove from the intentions.
+Returns:
+	None
+"""
+___.drop_all_desire(data_type: Belief | Goal)
+
+"""
+Stops and Removes the oldest intention and event from the intention and event list that both contains the given data_type.
+Args:
+	data_type: The data type to remove from the intentions.
+Returns:
+	None
+"""
+___.drop_desire(data_type: Belief | Goal)
+
+"""
+Removes all events from the event list that contains the given data_type.
+Args:
+	data_type: The data type to remove from the intentions.
+Returns:
+	None
+"""
+___.drop_all_event(data_type: Belief | Goal)
+
+"""
+Removes the oldest event from the event list that contains the given data_type.
+Args:
+	data_type: The data type to remove from the intentions.
+Returns:
+	None
+"""
+___.drop_event(data_type: Belief | Goal)
+
+"""
+Stops and Removes all intentions from the intention list that contains the given data_type.
+Args:
+	data_type: The data type to remove from the intentions.
+Returns:
+	None
+"""
+___.drop_all_intention(data_type: Belief | Goal)
+
+"""
+Stops and Removes the oldest intention from the intention list that contains the given data_type.
+Args:
+	data_type: The data type to remove from the intentions.
+Returns:
+	None
+"""
+___.drop_intention(data_type: Belief | Goal)
 
 """
 Start the agent reasoning cycle manually.
