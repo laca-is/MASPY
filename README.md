@@ -37,7 +37,7 @@ versions may work.
 ## Latest changes
 	maspy-v0.2.3:
 	- Properly addition of Intention Mechanisms
- 	- Update usage the environment plans
+ 	- Updated usage of environment plans
 
 	maspy-v0.2.2:
  	- Removed Numpy necessity
