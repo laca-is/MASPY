@@ -35,6 +35,10 @@ The minimum version of `Python` guarateed to work is 3.10, altough earlier
 versions may work.
 
 ## Latest changes
+	maspy-v0.2.3:
+	- Properly addition of Intention Mechanisms
+ 	- Update usage the environment plans
+
 	maspy-v0.2.2:
  	- Removed Numpy necessity
   
@@ -438,6 +442,24 @@ Returns:
 ___.rm(data_type: Belief | Goal | Iterable[Belief | Goal])
 
 """
+Adds one or more plans in agent
+Args: 
+    plan - Plan or Plan List
+Returns: 
+    None
+"""
+def add_plan(plan: Plan | List[Plan]):
+
+"""
+Removes one or more plans from agent
+Args: 
+    plan - Plan or Plan List
+Returns: 
+    None
+"""
+def rm_plan(plan: Plan | List[Plan]):
+
+"""
 Checks if the agent has an belief, goal, plan or event
 Args:
     data_type - Belief, Goal, Plan or Event
@@ -445,6 +467,25 @@ Returns:
     bool: True if has, False if not
 """
 ___.has(data_type: Belief | Goal | Plan | Event)
+
+"""
+Creates an test event for the given data_type
+Args:
+	data_type: The Belief or Goal to be tested
+Returns:
+	None
+"""
+___.test(self, data_type: Belief | Goal):
+
+"""
+Suspends the current plan for a given time or until a certain event is received.
+Args:
+	timeout: The time in seconds to suspend the plan. Defaults to None.
+	event: The event to wait for. Defaults to None.
+Returns:
+	None
+"""
+___.wait(timeout: Optional[float] = None, event: Optional[Event] = None)
 
 """  
 Retrieves a specific data from the agent's knowledge on the given data_type and search parameters
@@ -510,6 +551,7 @@ Returns:
 ___.perceive(env_name: str | list[str])
 
 """
+# Depreciated Method: Now you should directly use the environment function #
 Retrieves the environment instance with the given name to make an action
 Args:
     env_name - str: The name of the environment to retrieve.
@@ -517,6 +559,15 @@ Returns:
     Environment or None: The retrieved environment or None found.
 """
 ___.action(env_name: str)
+
+"""
+Start the agent reasoning cycle manually.
+Args:
+    None
+Returns:
+    None
+"""
+___.start()
 
 """
 Stop the cycle of the agent.
