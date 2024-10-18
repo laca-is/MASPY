@@ -264,7 +264,7 @@ class Park(Environment):
         # This specific percept does not create a event when percieved by an agent 
         self.create(Percept("spot",(1,"free"),adds_event=False))
 
-    def park_spot(self, driver, spot_id):
+    def park_spot(self, agt, spot_id):
         # The function get gives you percepts from the environment
         # It has various filters to make this search more precise
         spot = self.get(Percept("spot",(spot_id,"free")))
@@ -276,7 +276,7 @@ class Park(Environment):
             self.remove(spot)
             self.create(Percept("spot",(spot_id,driver)))
 
-    def leave_spot(self, driver):
+    def leave_spot(self, agt):
         spot = self.get(Percept("spot",("ID",driver)))
         if spot:
             self.change(spot,(spot.args[0],"free"))
@@ -291,7 +291,7 @@ class Park(Environment):
         super().__init__(env_name)
         self.create(Percept("spot",(1,"free"),adds_event=False))
 
-    def park_spot(self, driver, spot_id):
+    def park_spot(self, agt, spot_id):
         spot = self.get(Percept("spot",(spot_id,"free")))
         if spot:
             self.change(spot,(spot_id,driver))
@@ -303,8 +303,8 @@ class Driver(Agent)
         # Just give it Channel(Name) or Envrionment(Name) to add it to the agent 
         self.connect_to(Environment(park_name))
 
-        # After the connection, the agent can make an action with a Park function
-        self.action(park_name).park_spot(self.my_name,spot_id)
+        # After the connection, the agent can execute the envrionment plan directly
+        self.park_spot(spot_id)
 ```
 
 #### Simplest System with Every Class
@@ -312,8 +312,8 @@ class Driver(Agent)
 from maspy import *
 
 class SimpleEnv(Environment):
-    def env_act(self, agent1, agent2):
-        self.print(f"Contact between {agent1} and {agent2}")
+    def env_act(self, agt, agent2):
+        self.print(f"Contact between {agt} and {agent2}")
 
 class SimpleAgent(Agent):
     @pl(gain,Goal("say_hello","Agent"))
@@ -323,7 +323,7 @@ class SimpleAgent(Agent):
     @pl(gain,Belief("Hello"))
     def recieve_hello(self,src):
         self.print(f"Hello received from {src}")
-        self.action("SimpleEnv").env_act(self.my_name,src)
+        self.env_act(src)
 
 if __name__ == "__main__":
     Admin().set_logging(show_exec=True)
