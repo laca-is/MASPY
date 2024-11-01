@@ -1,4 +1,3 @@
-# ruff: noqa
 from maspy import *
 
 class Room(Environment):
@@ -54,7 +53,8 @@ class Robot(Agent):
             self.add(Goal("decide_move"))
     
     @pl(gain,Goal("move",("X","Y")))
-    def move(self,src,tgX,tgY):
+    def move(self,src,target):
+        tgX,tgY = target
         x, y = self.position
 
         self.print(tgX,tgY," - ",x,y)

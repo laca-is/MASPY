@@ -1,4 +1,3 @@
-#ruff: noqa
 from maspy import *
 
 class Sample(Agent):
@@ -12,14 +11,13 @@ class Sample(Agent):
         agents_list = self.find_in(["Sample","Receiver"],"Channel")
         for agent in agents_list:
             self.print(f"Sending> {msg} to {agent[0]}")
-            self.send(agent[0],achieve,Goal("receive_info",msg))
+            self.send(agent,achieve,Goal("receive_info",msg))
             
         agents_list = self.find_in("Test")["Test"]
         for agent in agents_list:
             plan = self.get(Plan,Belief("print"))
-            self.send(agent[0],tellHow,plan)
-            self.send(agent[0],tell,Belief("print"))
-            
+            self.send(agent,tellHow,plan)
+            self.send(agent,tell,Belief("print"))
         self.stop_cycle()
 
     @pl(gain,Goal("receive_info","Msg"),Belief("receiver"))
@@ -31,7 +29,6 @@ class Test(Agent):
     def __init__(self, name):
         super().__init__(name)
     
-
 if __name__ == "__main__":
     Channel().show_exec = True
     t = Test("Test")

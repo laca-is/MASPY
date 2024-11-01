@@ -17,7 +17,6 @@ class SimpleAgent(Agent):
         self.stop_cycle()
 
 if __name__ == "__main__":
-    #Admin().set_logging(show_exec=True,show_cycle=True,show_prct=True,show_slct=True)
     agent1 = SimpleAgent()
     agent2 = SimpleAgent()
     env = SimpleEnv()

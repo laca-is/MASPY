@@ -1,4 +1,3 @@
-# ruff: noqa
 from maspy import *
 import random as rnd
 from time import sleep
@@ -44,14 +43,15 @@ class Manager(Agent):
         self.send(broadcast,achieve,Goal("checkPrice",spot_price),"Parking")
     
     @pl(gain,Goal("offer_answer",("Answer","Price")),Belief("minPrice","MP"))
-    def offer_response(self,src,answer,price,min_price):
+    def offer_response(self,src,offer_answer,min_price):
+        answer, price = offer_answer
         match answer:
             case "reject":
                 self.print(f"Given price[{price}] rejected by {src}")
                 pass
             case "accept":
                 self.print(f"Price accepted[{price}] by {src}. Choosing spot.")
-                self.send_spot(src)
+                self.add(Goal("SendSpot",src),True)
             case "offer":
                 if price < min_price:
                     counter_offer = (min_price+price)/1.2
@@ -60,19 +60,25 @@ class Manager(Agent):
                     self.send(src,achieve,Goal("checkPrice",counter_offer),"Parking")
                 else:
                     self.print(f"Offered price from {src} accepted[{price}]. Choosing spot.")
-                    self.send_spot(src)
-            
-    def send_spot(self, agent):
-        self.perceive("Parking")
-        free_spots = self.get(Belief("spot",("Id","free"),"Parking"),all=True)
-        if free_spots:
-            random_spot = rnd.choice(free_spots)
-            spot_id = random_spot.args[0]
-            self.print(f"Sending spot({spot_id}) to {agent}")
-            self.send(agent,achieve,Goal("park",("Parking",spot_id)),"Parking")
-        else:
-            self.print(f"No spots available for {agent}")
-            self.send(agent,tell,Belief("no_spots_available"),"Parking")
+                    self.add(Goal("SendSpot",src),True)
+    
+    @pl(gain,Goal("SendSpot","Agent"), Belief("spot",("Id","free"),"Parking"))        
+    def send_spot(self, src, agent, spot):
+        #self.perceive("Parking")
+        #free_spots = self.get(Belief("spot",("Id","free"),"Parking"),all=True)
+        #if free_spots:
+        #    random_spot = rnd.choice(free_spots)
+        #    spot_id = random_spot.args[0]
+        spot_id = spot[0]
+        self.print(f"Sending spot({spot_id}) to {agent}")
+        self.send(agent,achieve,Goal("park",("Parking",spot_id)),"Parking")
+    
+    @pl(gain,Goal("SendSpot","Agent"))
+    def unavailable_spot(self, src, agent):
+        self.print(f"No spots available for {agent}")
+        self.send(agent,tell,Belief("no_spots_available"),"Parking")
+    
+    
     
 class Driver(Agent):
     def __init__(self, agt_name, budget, counter, wait):
@@ -83,7 +89,8 @@ class Driver(Agent):
         self.add(Belief("budget",budget,adds_event=False))
     
     @pl(gain,Goal("checkPrice","Price"),Belief("budget",("WantedPrice","MaxPrice")))
-    def check_price(self,src,given_price,want_price,max_price):
+    def check_price(self,src,given_price,budget):
+        max_price, want_price = budget
         self.add(Belief("offer_made",given_price,adds_event=False))
         if self.last_price == given_price:
             self.print(f"Rejecting price[{given_price}]. Same as last offer")
@@ -99,11 +106,15 @@ class Driver(Agent):
             counter_offer = round(counter_offer,2)
             self.print(f"Making counter-offer for price[{given_price}]. Offering[{counter_offer}]")
             answer = ("offer",counter_offer)
-        self.add(Belief("offer_answer",answer,adds_event=False))
-        self.send(src,achieve,Goal("offer_answer",answer),"Parking")
-        self.last_price = given_price
+            
         if answer[0] == "reject": 
             self.end_reasoning()
+        else:
+            self.add(Belief("offer_answer",answer,adds_event=False))
+            self.send(src,achieve,Goal("offer_answer",answer),"Parking")
+            self.last_price = given_price
+        #if answer[0] == "reject": 
+        #    self.end_reasoning()
     
     @pl(gain,Belief("no_spots_available"))
     def no_spots(self,src):
@@ -112,7 +123,8 @@ class Driver(Agent):
         
     
     @pl(gain,Goal("park",("Park_Name","SpotID")))
-    def park_on_spot(self,src,park_name,spot_id):
+    def park_on_spot(self,src,spot):
+        park_name, spot_id = spot
         self.connect_to(Environment(park_name))
         self.print(f"Parking on spot({spot_id})")
         confirm = self.action(park_name).park_spot(self.str_name,spot_id)
@@ -131,11 +143,9 @@ class Driver(Agent):
         global end_flag
         with self.lock:
             end_flag += 1
-        self.print(f"Ended reasoning ({end_flag})")
+        print(f"{self.str_name} Ended reasoning ({end_flag})")
         if Admin().running_class_agents("Drv") is False:
             Admin().stop_all_agents()
-        
-    
         
 if __name__ == "__main__":
     park = Parking('Parking',100)
@@ -152,7 +162,7 @@ if __name__ == "__main__":
         wait = drv_settings["wait"][(i*4)%5]
         driver_list.append(Driver("Drv",budget,counter,wait))
 
+    Admin().block_prints()
     Admin().connect_to(manager, [park,park_ch])
     Admin().connect_to(driver_list, park_ch)
-    Admin().slow_cycle_by(0.1)
     Admin().start_system()

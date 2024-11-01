@@ -1,5 +1,3 @@
-# ruff: noqa
-
 from maspy import *
 from random import choice
 
@@ -54,7 +52,6 @@ if __name__=="__main__":
     c1 = Cruzamento("C1")
     ag1 = VA("VA")
     ag2 = CT("CT")
-    #ag2.show_prct = True
     Admin().connect_to([ag1,ag2],c1)
     Admin().start_system()    
     

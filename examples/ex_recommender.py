@@ -1,5 +1,3 @@
-# ruff: noqa: F405, F403 
-
 from maspy import *
 from random import choice, choices
 from time import sleep
