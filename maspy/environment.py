@@ -104,12 +104,14 @@ class Environment(metaclass=EnvironmentMultiton):
     def __init__(self, env_name: Optional[str]=None,full_log: bool=False):
         self._my_name = env_name if env_name else type(self).__name__
         self.show_exec = full_log
+        self.printing = True
         self.lock = Lock()
         
         from maspy.admin import Admin
         Admin()._add_environment(self)
+        self.sys_time = Admin().sys_time
         #  Dict[Agt_cls, Dict[Agt_name, Set[Agt_fullname]]]
-        self.agent_list: Dict[str, Dict[str, Set[tuple]]] = dict()
+        self.agent_list: Dict[str, Dict[str, Set[str]]] = dict()
         #  Dict[Agt_fullname, Agt_inst]
         self._agents: Dict[str, 'Agent'] = dict()
         
@@ -125,6 +127,8 @@ class Environment(metaclass=EnvironmentMultiton):
             self._actions = []
     
     def print(self,*args, **kwargs):
+        if not self.printing:
+            return 
         return print(f"{self._name}>",*args,**kwargs)
     
     @property
@@ -168,11 +172,11 @@ class Environment(metaclass=EnvironmentMultiton):
         assert isinstance(agent.my_name, tuple)
         if type(agent).__name__ in self.agent_list:
             if agent.my_name[0] in self.agent_list[type(agent).__name__]:
-                self.agent_list[type(agent).__name__][agent.my_name[0]].update({agent.my_name})
+                self.agent_list[type(agent).__name__][agent.my_name[0]].update({agent.str_name})
             else:
-                self.agent_list[type(agent).__name__].update({agent.my_name[0] : {agent.my_name}})
+                self.agent_list[type(agent).__name__].update({agent.my_name[0] : {agent.str_name}})
         else:
-            self.agent_list[type(agent).__name__] = {agent.my_name[0] : {agent.my_name}}
+            self.agent_list[type(agent).__name__] = {agent.my_name[0] : {agent.str_name}}
             
         self._agents[agent.str_name] = agent
         self.print(f'Connecting agent {type(agent).__name__}:{agent.my_name}') if self.show_exec else ...
@@ -194,7 +198,7 @@ class Environment(metaclass=EnvironmentMultiton):
             #self.print(f"Removing agent {agent.str_name} from {self._agents.keys()}")
             del self._agents[agent.str_name]
             #self.print(f"new list: {self._agents.keys()}")
-            self.agent_list[type(agent).__name__][agent.my_name[0]].remove(agent.my_name)
+            self.agent_list[type(agent).__name__][agent.my_name[0]].remove(agent.str_name)
         self.print(
             f"Disconnecting agent {type(agent).__name__}:{agent.my_name}"
         ) if self.show_exec else ...

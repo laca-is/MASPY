@@ -39,25 +39,31 @@ class CommsMultiton(type):
 class Channel(metaclass=CommsMultiton):
     def __init__(self, comm_name:str="default"):
         self.show_exec = False
+        self.printing = True
         
         from maspy.admin import Admin
         self._my_name = comm_name
+        self.sys_time = Admin().sys_time
         Admin()._add_channel(self)
         
         from maspy.agent import Belief, Goal, Ask, Plan
         self.data_types = {Belief,Goal,Ask,Plan}
         self._my_name = comm_name
-        self.agent_list: Dict[str, Dict[str, Set[tuple[str, int]]]] = dict()
+        self.agent_list: Dict[str, Dict[str, Set[str]]] = dict()
         self._agents: Dict[str, 'Agent'] = dict()
         self._name = f"{type(self).__name__}:{self._my_name}"
         self.send_counter = 0
         self.send_counter_agent: Dict[str,int] = dict()
+        self.messages_log: Dict[float, List[Dict[str, Any]]] = dict()
         
     def print(self,*args, **kwargs):
+        if not self.printing: 
+            return
         return print(f"{self._name}>",*args,**kwargs)
     
     @property
     def get_info(self):
+        
         return {"connected_agents": list(self._agents.keys()).copy()}
     
     def add_agents(self, agents: Union[List['Agent'],'Agent']):
@@ -71,18 +77,17 @@ class Channel(metaclass=CommsMultiton):
         assert isinstance(agent.my_name, tuple)
         if type(agent).__name__ in self.agent_list:
             if agent.my_name[0] in self.agent_list[type(agent).__name__]:
-                self.agent_list[type(agent).__name__][agent.my_name[0]].update({agent.my_name})
+                self.agent_list[type(agent).__name__][agent.my_name[0]].update({agent.str_name})
                 self._agents[agent.str_name] = agent
             else:
-                self.agent_list[type(agent).__name__].update({agent.my_name[0] : {agent.my_name}})
+                self.agent_list[type(agent).__name__].update({agent.my_name[0] : {agent.str_name}})
                 self._agents[agent.str_name] = agent
         else:
-            self.agent_list[type(agent).__name__] = {agent.my_name[0] : {agent.my_name}}
+            self.agent_list[type(agent).__name__] = {agent.my_name[0] : {agent.str_name}}
             self._agents[agent.str_name] = agent
         
         self.print(f'Connecting agent {type(agent).__name__}:{agent.my_name}') if self.show_exec else ...
-
-            
+       
     def _rm_agents(self, agents: Union[List['Agent'],'Agent']):
         if isinstance(agents, list):
             for agent in agents:
@@ -94,7 +99,7 @@ class Channel(metaclass=CommsMultiton):
         assert isinstance(agent.my_name, tuple)
         if agent.my_name in self._agents:
             del self._agents[agent.str_name]
-            self.agent_list[type(agent).__name__][agent.my_name[0]].remove(agent.my_name)
+            self.agent_list[type(agent).__name__][agent.my_name[0]].remove(agent.str_name)
         self.print(
             f"Desconnecting agent {type(agent).__name__}:{agent.my_name}"
         ) if self.show_exec else ...
@@ -121,6 +126,18 @@ class Channel(metaclass=CommsMultiton):
         except AssertionError:
             raise
         
+        
+        cur_time = self.sys_time()
+        if target == broadcast:
+            target = "broadcast"
+        msg_dict = {"sender":sender,"target":target,"act":act.name,"message":message}
+        if cur_time in self.messages_log:
+            self.messages_log[cur_time].append(msg_dict)
+        else:
+            self.messages_log[cur_time] = [msg_dict]
+        
+        #print(f'\n{self.messages_log}\n')
+        
         with Lock():
             self.send_counter += 1
             sender = sender.split("_")[0]
@@ -128,6 +145,7 @@ class Channel(metaclass=CommsMultiton):
                 self.send_counter_agent[sender] = 1
             else:
                 self.send_counter_agent[sender] += 1
+                
     
     def _sending(self, sender: str, target: str, act: Act, msg: Union['Belief', 'Goal', 'Ask', 'Plan']):
         self.print(f"{sender} sending {act.name}:{msg} to {target}") if self.show_exec else ...        

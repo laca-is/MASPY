@@ -185,7 +185,7 @@ class Event:
     data: Belief | Goal = field(default_factory=Belief)
     
     def __str__(self) -> str:
-        return f"Event( {self.change.name}, {self.data})"
+        return f"{self.change.name}:{self.data}"
     
     def __repr__(self):
         return self.__str__()
@@ -198,7 +198,7 @@ class Plan:
     ev_ctrl: threading.Event = threading.Event()
     
     def __str__(self) -> str:
-        return f"Plan( {self.trigger}, {self.context}, {self.body.__name__}() )"
+        return f"{self.trigger}, {self.context}, {self.body.__name__}() )"
     
     def __repr__(self):
         return self.__str__()
@@ -267,7 +267,10 @@ class Agent:
         self.show_prct: bool = show_prct
         self.show_slct: bool = show_slct
         self.log_type: str = log_type
-        self.cycle_log: Dict[int, tuple] = dict()
+        self.cycle_log: Dict[float, list[Dict[str, Any]]] = dict()
+        self.cycle_counter = 0
+        self.last_log: Dict[str, Any] = dict()
+        self.printing = True
         
         from maspy.admin import Admin
         self.unique: bool = False
@@ -276,6 +279,7 @@ class Agent:
         self.my_name: tuple[str, int] = (name, 0)
         Admin().add_agents(self)
         self.str_name = '_'.join([self.my_name[0],str(self.my_name[1])])
+        self.sys_time = Admin().sys_time
         
         self.delay: int|float = 0.000001
         self.stop_flag: threading.Event | None = None
@@ -296,32 +300,39 @@ class Agent:
         #, "Learning":self._learning_models}
 
         self.max_intentions: int = nax_intentions
-        self.last_intention: tuple[Plan, tuple] = (Plan(), tuple())
-        self.__intentions: list[tuple[Plan, tuple]] = []
-        self.__supended_intentions: list[tuple[Plan, tuple, str, Event | None]] = []
-        self.__running_intentions: list[tuple[Plan, tuple]] = []
+        self.last_intention: tuple[Plan, Event, tuple] = (Plan(), Event(), tuple())
+        self.__intentions: list[tuple[Plan, Event, tuple]] = []
+        self.__supended_intentions: list[tuple[Plan, Event, tuple, str, Event | None]] = []
+        self.__running_intentions: list[tuple[Plan, Event, tuple]] = []
         
         
         self.__events: List[Event] = []
         self.last_event: Event | None = None
         self.__beliefs: Dict[str | tuple[str, int], Dict[str, Set[Belief]]] = dict()
         self.__goals: Dict[str | tuple[str, int], Dict[str, Set[Goal]]] = dict()
+        self.belief_list: List[Belief] = []
+        self.goal_list: List[Goal] = []
+        self.last_goal: Goal | None = None
+        self.running_goal: Goal | None = None
+        
+        self.last_sent: list[tuple[str, str | List[str], str, MSG]] = []
+        self.last_recv: list[tuple[str, MSG]] = []
+        self.last_plan: Plan | None = None
+        
         if beliefs: 
             self.add(beliefs, False)
         if goals: 
             self.add(goals, False)
-            
+        
         self._plans: List[Plan]
         try:    
             if not self._plans:
                 self._plans = []
         except AttributeError:
             self._plans = []
-        self.last_plan: Plan | None = None
 
         self.instant_mail = instant_mail
         self.read_all_mail = read_all_mail
-        self.last_msg: tuple[str, str | List[str], Act.name, MSG] | None = None
         self.connect_to(Channel())
         self.paused_agent = False
 
@@ -329,6 +340,8 @@ class Agent:
         self.reasoning()
     
     def print(self,*args, **kwargs):
+        if not self.printing:
+            return
         if self.unique:
             return print(f"Agent:{self.my_name[0]}>",*args,**kwargs)
         else:
@@ -370,24 +383,7 @@ class Agent:
             buffer += f"\n\t{plan}"
         self.print(buffer)
     
-    @property
-    def get_info(self):
-        beliefs = manual_deepcopy(self.__beliefs)
-        beliefs_list = []
-        for sources_dict in beliefs.values():
-            for belief_set in sources_dict.values():
-                for belief in belief_set:
-                    beliefs_list.append(belief)
-                    
-        goals = manual_deepcopy(self.__goals)
-        goals_list = []
-        for group_keys in goals.values():
-            for goal_set in group_keys.values():
-                for goal in goal_set:
-                    goals_list.append(goal)
-        
-        return {"beliefs": beliefs_list, "goals": goals_list,  "intentions": self.__intentions.copy(), "running_intention": self.__running_intentions.copy(), "last_intention": self.last_intention, "connected_envs": list(self._environments.keys()).copy(), "connected_chs": list(self._channels.keys()).copy()}
-    
+            
     def connect_to(self, target: Environment | Channel | str):
         if isinstance(target, str):
             classes: List[tuple] = []
@@ -437,7 +433,7 @@ class Agent:
         self._plans += plans
 
     def rm_plan(self, plan: Plan | List[Plan]):
-        if type(plan) is list:
+        if isinstance(plan,list):
             for p in plan: 
                 self._plans.remove(p)
         else:
@@ -489,9 +485,22 @@ class Agent:
             print(f"Type is neither Belief | Goal | Plan | Event : {data_type}")
             return None
     
-    def add(self, data_type: Belief | Goal | Iterable[Belief | Goal], synchronous: bool = True):
+    def update_lists(self, data_type: Belief | Goal, change: str):
+        if change == "add":
+            if isinstance(data_type,Belief):
+                self.belief_list.append(data_type)
+            else:
+                self.goal_list.append(data_type)
+        if change == "rm":
+            if isinstance(data_type,Belief):
+                self.belief_list.remove(data_type)
+            else:
+                self.goal_list.remove(data_type)
+        
+    def add(self, data_type: Belief | Goal | Iterable[Belief | Goal], instant: bool = False):
+        self.save_cycle_log("Adding Info",f'{data_type} instant[{instant}]')
         if self.running is False:
-            synchronous = False
+            instant = False
         self.print(f"Adding {data_type}") if self.show_exec else ...
         cleaned_data = self._clean(data_type)
         
@@ -501,12 +510,18 @@ class Agent:
             type_base = self._get_type_base(type_data)
             if isinstance(type_base,dict):
                 merge_dicts(data,type_base)
-        
-        self._new_event(gain,data_type,synchronous)
+            
+            for src in data.values():
+                for values in src.values():
+                    for data_v in values:    
+                        self.update_lists(data_v,"add")
+                        
+        self._new_event(gain,data_type,instant)
     
-    def rm(self, data_type: Belief | Goal | Iterable[Belief | Goal], synchronous: bool = True):
+    def rm(self, data_type: Belief | Goal | Iterable[Belief | Goal], instant: bool = False):
+        self.save_cycle_log("Removing Info",f'{data_type}:{instant}')  
         if self.running is False:
-            synchronous = False
+            instant = False
         self.print(f"Removing {data_type}") if self.show_exec else ...
         
         if not isinstance(data_type, Iterable): 
@@ -520,7 +535,9 @@ class Agent:
             else:
                 self.print(f"Data_Type {typ} is neither Belief or Goal")
                 
-        self._new_event(lose,data_type,synchronous)
+            self.update_lists(typ,"rm")
+              
+        self._new_event(lose,data_type,instant)
 
     def test(self, data_type: Belief | Goal):
         self._new_event(test,data_type)
@@ -605,7 +622,7 @@ class Agent:
                     plan_function_name = prev_frame.f_code.co_name
                     tracing = False
             
-            intention: tuple[Plan, tuple]
+            intention: tuple[Plan, Event, tuple]
             
             for run_int in self.__running_intentions:
                 if run_int[0].body.__name__ == plan_function_name:
@@ -619,7 +636,6 @@ class Agent:
         
         intention_reason = intention + (reason, event)
         with self.lock:
-            #self.print("rm ",self.__running_intentions)
             self.__running_intentions.remove(intention)
             self.__supended_intentions.append(intention_reason)
         
@@ -632,8 +648,6 @@ class Agent:
             sleep(0.01)
         with self.lock:
             self.__running_intentions.append(intention)
-            #sleep(0.1)
-        #self.print("add ",self.__running_intentions)
     
     def drop_all_desires(self):
         self.drop_all_events()
@@ -723,7 +737,7 @@ class Agent:
                     msg = Ask(msg, self.str_name)
                     
                 self._channels[channel]._send(self.str_name,target,msg_act,msg)
-                self.last_msg = (self.str_name,target,msg_act.name,msg)
+                self.last_sent.append((self.str_name,target,msg_act.name,msg))
                 msg.reply_event.wait()
                 
                 if msg.reply_content is not None:
@@ -734,7 +748,15 @@ class Agent:
                     return None
             else:
                 self._channels[channel]._send(self.str_name,target,msg_act,msg)
-                self.last_msg = (self.str_name,target,msg_act.name,msg)
+                self.last_sent.append((self.str_name,target,msg_act.name,msg))
+            
+            ch = ""
+            if channel != DEFAULT_CHANNEL:
+                ch = f" in ch:{channel}"
+            if type(target) is str: 
+                self.save_cycle_log("Send Message", f' {self.str_name}  to  {target}  <{msg_act.name}>{msg}{ch}')
+            else:
+                self.save_cycle_log("Send Message", f' {self.str_name}  broadcasting  <{msg_act.name}>{msg}{ch}')
         except KeyError:
             self.print(f"Not Connected to Selected Channel:{channel}")
         except AssertionError:
@@ -757,6 +779,7 @@ class Agent:
             while self.saved_msgs:
                 act,msg = self.saved_msgs.pop(0)
                 try:
+                    self.last_recv.append((act.name,msg))
                     self.recieve_msg(act,msg)
                 except AssertionError as ae:
                     print(f"\t{repr(ae)}")
@@ -839,7 +862,7 @@ class Agent:
             cls_type: str = "channel", 
             cls_name: str = "default", 
             cls_instance: Environment | Channel | None = None
-        ) -> dict | Set[tuple] | None:
+        ) -> dict[str, Set[str]] | Set[str] | None:
         if isinstance(cls_type, str) and cls_type != "channel":
             cls_type = cls_type.lower()
             if cls_type in _type_env_set:
@@ -849,7 +872,7 @@ class Agent:
             else:
                 return None               
             
-        agents: Dict[str, Dict[str, Set[tuple]]]
+        agents: Dict[str, Dict[str, Set[str]]]
         if cls_instance:
             agents = manual_deepcopy(cls_instance.agent_list)
         else:
@@ -882,7 +905,7 @@ class Agent:
             if hasattr(instance, name):
                 method = getattr(instance, name)
                 def wrapper(*args, **kwargs):
-                    return method(self.str_name, *args, **kwargs)
+                    return method(self.str_name, *args, **kwargs)   
                 return wrapper
         raise AttributeError(f"{self.str_name} doesnt have the method '{name}' and is not connected to any environment with the method '{name}'.")
     
@@ -894,35 +917,45 @@ class Agent:
     
     def stop_cycle(self, log_flag=False) -> None:
         self.print("Shutting Down...") if log_flag else ...
+        self.save_cycle_log(decision="End of Reasoning")
         self.running = False
         if self.stop_flag is not None:
             self.stop_flag.set()
         self.paused_agent = True
-        
-            
+                 
     def cycle(self, stop_flag: threading.Event) -> None:
-        cycle_counter = 0
+        self.cycle_counter = 0
         while not stop_flag.is_set():   
             self.print("#### New cycle ####") if self.show_cycle else ...
             self._perception()   
             self._mail() 
-            self.print(f"Last sent Message: {self.last_msg}") if self.show_cycle else ... 
             event = self._select_event()
-            self.print(f"Selected event: {event} in {self.__events} (last event: {self.last_event})") if self.show_cycle else ...
+            self.print(f"Selected event: {event} in {self.__events}") if self.show_cycle else ...
             plans = self._retrieve_plans(event)
             self.print(f"Selected plans: {plans} in {self._plans}") if self.show_cycle else ...
-            chosen_plan, args = self._select_intention(plans,event)
-            self.print(f"Selected intention to run: {chosen_plan} with {args} arguments (last intention: {self.last_intention})") if self.show_cycle else ...
+            chosen_plan, trgr, args = self._select_intention(plans,event)
+            self.print(f"Selected intention to run: {chosen_plan} with {args} arguments") if self.show_cycle else ...
             
-            #self.cycle_log[cycle_counter] = (self.last_msg, event, self.last_event, plans, chosen_plan, args)
-            #cycle_counter += 1
+            if chosen_plan is not None and trgr is not None:
+                decision = "Execute Intention"
+                data = f' {chosen_plan}, source[{trgr.data.source}], args{args}'
+            elif len(self.__running_intentions) >= 1:
+                decision = "Running Intention"
+                data = f'{self.__running_intentions[0]}'
+            else:
+                decision = "No Intention"
+                data = None
+                
+            self.save_cycle_log(decision, data, event, plans)
+            
             
             if stop_flag.is_set():
                 break
-            self._execute_plan(chosen_plan, event, args)
+            self._execute_plan(chosen_plan, trgr, args)
             self.print("#### End of cycle ####") if self.show_cycle else ...
             if self.delay: 
                 sleep(self.delay)
+            self.cycle_counter += 1
     
     def _perception(self) -> None:
         percept_dict: Dict[str, dict] = dict()
@@ -1013,7 +1046,6 @@ class Agent:
         if self.__events == []: 
             return None 
         event = self.__events.pop(0)
-        self.last_event = event
         return event
     
     def _instant_plan(self, event: Event):
@@ -1030,7 +1062,12 @@ class Agent:
                 break
             
         if args is not None:
-            self._run_plan(plan,event.data,args,True)
+            if event.data.args_len < 2:
+                ev_args = event.data._args
+            else:
+                ev_args = (event.data._args,)
+            self.save_cycle_log("Instant Plan", (plan,event, " trigger:",event, " args:",ev_args+args),event,plans)
+            self._run_plan(plan,event,ev_args+args,True)
         elif type(event.data) is Goal:
             self.print(f"Found no applicable plan for {event.change.name}:{event.data}")
     
@@ -1041,37 +1078,51 @@ class Agent:
         assert isinstance(retrieved, list | None), f"Unexpected Retrieved Plan: {type(retrieved)}, Expected List[Plan] | None"
         return cast(List[Plan] | None, retrieved) 
     
-    def _select_intention(self, plans: List[Plan] | None, event: Event | None) -> tuple[Plan, tuple] | tuple[None, tuple]:
+    def _select_intention(self, plans: List[Plan] | None, event: Event | None) -> tuple[Plan, Event, tuple] | tuple[None, None, tuple]:
         if plans is None:
             if event is not None and isinstance(event.data,Goal):
                 self.print(f"No applicable Plan found for {event}")
             try:
-                plan, args = self.__intentions.pop(0)
-                return plan, args
+                plan, trigger, args = self.__intentions.pop(0)
+                return plan, trigger, args
             except IndexError:
-                return None, tuple()
-        while plans:
-            plan = plans.pop(0)
+                return None, None, tuple()
+        retrieved_plans = plans.copy()
+        while retrieved_plans:
+            plan = retrieved_plans.pop(0)
             ctxt = self._retrieve_context(plan)
-            if ctxt is not None:
-                self.__intentions.append((plan,ctxt))
-                break 
+            if ctxt is not None and event is not None:
+                if event.data.args_len < 2:
+                    ev_args = event.data._args
+                else:
+                    ev_args = (event.data._args,)
+                
+                if ctxt == ((),):
+                    args = ev_args
+                else:
+                    args = ev_args+ctxt
+                
+                self.__intentions.append((plan,event,args))
+                break
         try:
-            plan, args = self.__intentions.pop(0)
-            return plan, args
+            plan, trigger, args = self.__intentions.pop(0)
+            return plan, trigger, args
         except IndexError:
             self.print(f"Found no applicable plan for {event.change.name}:{event.data}") if self.show_exec and event is not None else ...
-            return None, tuple()
+            return None, None, tuple()
     
     def _retrieve_context(self, plan: Plan) -> tuple | None:
         args: tuple = tuple()
         for context in plan.context:
-            ctxt = self.get(context,ck_src=False) # Returns the first context variable found
+            ctxt = self.get(context,ck_src=False) 
             if ctxt is None: 
                 break
             assert isinstance(ctxt, Belief | Goal), f"Unexpected Context Type: {type(ctxt)}, Expected Belief | Goal" 
-            for x in ctxt._args:
-                args += (x,)  
+            if ctxt.args_len == 1:
+                args += ctxt._args
+            else:
+                args += (ctxt._args,)  
+            
         else:
             return args
         return None
@@ -1088,53 +1139,73 @@ class Agent:
         self.print(f"Exception raised in thread {thread_id}")
         thread.join()
     
-    def _execute_plan(self, chosen_plan: Plan | None, event: Event | None, args: tuple[Any, ...]):
+    def _execute_plan(self, chosen_plan: Plan | None, trigger: Event | None, args: tuple[Any, ...]):
         if not chosen_plan or len(self.__running_intentions) >= self.max_intentions:
             return None
         try:
-            assert event is not None
-            plan_thread = threading.Thread(target=self._run_plan, args=(chosen_plan,event.data,args))
-            self.__running_intentions.append((chosen_plan, args))
+            assert trigger is not None, f"Unexpected None Trigger with {chosen_plan}:{args}"
+            self.__running_intentions.append((chosen_plan, trigger, args))
+            plan_thread = threading.Thread(target=self._run_plan, args=(chosen_plan,trigger,args))
             plan_thread.start()
-            
         except RunPlanError:
             self.print(f"{chosen_plan} failed")
 
-    def _run_plan(self, plan: Plan, trigger: Belief | Goal, args: tuple, instant_flag: bool = False):
+    def _run_plan(self, plan: Plan, trigger: Event, args: tuple, instant_flag: bool = False):
         self.print(f"Running {plan}")  if self.show_exec or self.show_cycle else ...
         try:
-            result = plan.body(self, trigger.source, *trigger._args, *args)
+            trigger_type = trigger.data
+            if type(trigger_type) is Goal:
+                self.last_goal = trigger_type
+                if trigger_type in self.__goals[trigger_type.source][trigger_type.key]:
+                    self.__goals[trigger_type.source][trigger_type.key].remove(trigger_type)
+                    self.update_lists(trigger_type,"rm")
+                else:
+                    self.print(f"{trigger_type} lost before correct execution")
+            
+            result = plan.body(self, trigger.data.source, *args)
             if not instant_flag:
-                self.__running_intentions.remove((plan, args))
-                self.last_intention = (plan, args)
-            if type(trigger) is Goal:
-                self.__goals[trigger.source][trigger.key].remove(trigger)
+                self.__running_intentions.remove((plan,trigger,args))
+                self.last_intention = (plan,trigger,args)
+                
             self.last_plan = plan
             return result
         except Exception as e:
-            self.print(f"Error while executing {plan}:\n\tTrigger={trigger} | Context={args}\n\t{repr(e)}")
+            buffer = f"<{self.str_name}> Error while executing {plan}:\n\tTrigger={trigger} | Context={args}\n\t{repr(e)}\n"
             _, _, exc_traceback = sys.exc_info()
             tb_entries = traceback.extract_tb(exc_traceback)
             
-            excluded_files = ['agent.py', 'communication.py', 'admin.py', 'environment.py']
+            #excluded_files = ['agent.py', 'communication.py', 'admin.py', 'environment.py']
             
             filtered_entries = [
                 entry for entry in tb_entries 
-                if not any(excluded_file in entry.filename for excluded_file in excluded_files)
+                #if not any(excluded_file in entry.filename for excluded_file in excluded_files)
             ]
             
             if filtered_entries:
-                buffer = "  Filtered Traceback (most recent call last):\n"
+                buffer += "  Filtered Traceback (most recent call last):\n"
                 for entry in filtered_entries:
-                    buffer +=f'  File "{entry.filename}", line {entry.lineno}, in {entry.name}\n'
+                    buffer +=f'  File "{entry.filename}", line {entry.lineno}, in {entry.name}, during cycle {self.cycle_counter}\n'
                     if entry.line:
                         buffer += f'    {entry.line}'
-                print(buffer)
             else:
-                print("No matching traceback entries found.")
+                buffer += " No matching traceback entries found."
+            print(buffer)
             exit(1) 
-            
-
+    
+    def save_cycle_log(self, decision: str, data: Any | None = None, event: Event | None = None, plans: List[Plan] | None = None) -> None:
+        log: Dict[str, Any] = {"cycle":self.cycle_counter}
+        info = {"decision":decision,"data":data,"beliefs":self.belief_list.copy(),"goals":self.goal_list.copy(),"running_goal":self.last_goal,"last_recv":self.last_recv,"event":event, "retrieved_plans":plans,"intentions":self.__intentions.copy(),"events":self.__events.copy(),"connected_envs":list(self._environments.keys()), "connected_chs":list(self._channels.keys())}
+        self.last_recv = []
+        self.last_goal = None
+        if self.last_log != info and (self.running or self.cycle_counter == 0):
+            self.last_log = info
+            log.update(info)
+            sys_time = self.sys_time()
+            if sys_time in self.cycle_log:
+                self.cycle_log[sys_time].append(log)
+            else:
+                self.cycle_log[sys_time] = [log]
+    
     # TODO: implement stoping plan
     def _stop_plan(self, plan):
         self.print(f"Stoping {plan})")  if self.show_exec else ...
@@ -1143,7 +1214,7 @@ class Agent:
     # TODO: should invalid arguments be an error or a warning?
     def _clean(
         self, data_type: Iterable[Belief | Goal] | Belief | Goal 
-    ) -> Dict:
+    ) -> Dict[Type[Belief | Goal], dict[str, Dict[str, Set[Belief | Goal]]]]:
         type_dicts: Dict[Type[Belief | Goal], dict] = {Belief: dict(), Goal: dict()}
         match data_type:
             case None:

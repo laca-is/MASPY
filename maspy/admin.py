@@ -1,4 +1,4 @@
-from threading import Lock
+from threading import Lock, Thread
 from typing import Any, Dict, List, Union, Optional
 from collections.abc import Iterable
 from maspy.environment import Environment
@@ -6,8 +6,10 @@ from maspy.communication import Channel
 from maspy.agent import Agent
 import pprint
 import signal
+import pandas as pd # type: ignore
 from time import sleep, time
 import os
+import sys
 
 class AdminMeta(type):
     _instances: Dict[str, Any] = {}
@@ -38,7 +40,9 @@ class Admin(metaclass=AdminMeta):
         self._agents: Dict[tuple, Agent] = dict()
         self._channels: Dict[str, Channel] = dict()
         self._environments: Dict[str, Environment] = dict()
+        
         self.system_report = False
+        self._report_lock = False
         self.recording = False
         self.record_rate = 5
         self.start_time: float|None = None
@@ -144,8 +148,12 @@ class Admin(metaclass=AdminMeta):
         self.system_info[current_time]["agent"].update(agent_info)
         self.system_info[current_time]["Environment"].update(env_info)
         self.system_info[current_time]["Communication"].update(ch_info)
-                    
     
+    def sys_time(self):
+        if self.start_time is None:
+            return 0.000000
+        return round(time() - self.start_time,6)
+
     def start_system(self:'Admin') -> None:
         no_agents = True
         self.start_time = time()
@@ -183,16 +191,19 @@ class Admin(metaclass=AdminMeta):
     def running_agents(self:'Admin') -> bool:
         for agent in self._agents.values():
             if agent.running:
-                #print(f"Agent {agent.my_name} is running")
                 return True
         return False
 
     def print_running(self:'Admin', cls=None) -> bool:
-        buffer = "Agent(s):\n"
+        buffer = "Still running agent(s):\n"
+        flag = False
         for agent in self._agents.values():
             if agent.running and (cls is None or agent.my_name[0] == cls):
-                buffer += f"{agent.str_name}: ({agent.get_info})\n"
-        print(buffer)
+                flag = True
+                buffer += f"{agent.str_name} | "
+        if flag:
+            print(buffer)
+            return True
         return False 
 
     def start_agents(
@@ -222,28 +233,139 @@ class Admin(metaclass=AdminMeta):
             self.print(f"'Agent' {agent_name} not connected to environment")
             
     def stop_all_agents(self,sig=None,frame=None):
+        if self._report_lock:
+            return
         self.elapsed_time = time() - self.start_time
         self.print("[Closing System]")
+        self.print_running()
         for agent in self._agents.values():
-            agent.stop_cycle(False)
+            if agent.running:
+                agent.stop_cycle(False)
             
         print("Ending MASPY Program")
         if self.recording:
             #json_string = json.dumps(self.system_info, indent=2)
             pprint.pprint(self.system_info, indent=2, sort_dicts=False)
-        if self.system_report:
-            buffer = "\n# System Report #\n"
-            #print(f'Confirmation (spots_sold): {self._environments["Parking"].print_percepts}')
-            buffer += f'Elapsed Time: {round(self.elapsed_time,4)} seconds\n'
-            buffer += f'Total Agents: {len(self._agents)}\n'
-            for name, counter in self._num_agent.items():
-                buffer += f'  {name}: {counter}\n'
-            buffer += f'Total Msgs: {self._channels["Parking"].send_counter}\n'
-            for sender, counter in self._channels["Parking"].send_counter_agent.items():
-                buffer += f'  By {sender}\'s: {counter} msgs\n'
-            print(buffer)
+        if self.system_report and not self._report_lock:
+            self._report_lock = True
+            print("Making System Report...")
+            self._print_report()
+            print("System Report Completed")
         os._exit(0)
     
+    def _print_report(self) -> None:
+        # buffer = "\n# System Report #\n"
+        # #print(f'Confirmation (spots_sold): {self._environments["Parking"].print_percepts}')
+        # buffer += f'Elapsed Time: {round(self.elapsed_time,4)} seconds\n'
+        # buffer += f'Total Agents: {len(self._agents)}\n'
+        # for name, counter in self._num_agent.items():
+        #     buffer += f'  {name}: {counter}\n'
+        # buffer += f'Total Msgs: {self._channels["Parking"].send_counter}\n'
+        # for sender, counter in self._channels["Parking"].send_counter_agent.items():
+        #     buffer += f'  By {sender}\'s: {counter} msgs\n'
+        # print(buffer)
+        log_dict: Dict[float, Dict[str, Dict[str, Any]]] = dict() 
+        for instance in self._agents.values():
+            for key, value in instance.cycle_log.items():
+                for idx, log in enumerate(value):
+                    if len(value) > 1:
+                        instance_name = f"{instance.str_name} ({idx})"
+                    else:
+                        instance_name = instance.str_name
+                    if key in log_dict:
+                        log_dict[key][instance_name] = log
+                    else:
+                        log_dict[key] = {instance_name: log}
+
+        main_name = os.path.basename(sys.argv[0]).split(".py")[0]
+        self.dict_to_excel(log_dict, f"{main_name}_report")
+    
+    def dict_to_excel(self, data_dict: Dict, output_file):
+        rows = []
+        total_iterations = sum(len(instances) for instances in data_dict.values())
+        processed_iterations = 0
+        print("Managing Data...")
+        for sys_time, instances in data_dict.items():
+            assert isinstance(instances, dict)
+            for instance, instance_data in instances.items():
+                assert isinstance(instance_data, dict)
+                processed_iterations += 1
+                percentage = (processed_iterations / total_iterations) * 100
+                #self.print_progress_bar(percentage)
+                row = {
+                    "Time": sys_time,
+                    "Instance": instance,
+                    "Cycle": instance_data.get("cycle", None),
+                    "Decision": instance_data.get("decision", None),
+                    "Data": instance_data.get("data", None),
+                    "Running Goal": instance_data.get("running_goal", None),
+                    "Received Msgs": instance_data.get("last_recv", None),
+                    "Event": instance_data.get("event", None),
+                    "Retrieved Plans": instance_data.get("retrieved_plans", None),
+                    "Events": instance_data.get("events", None),
+                    "Connected Envs": instance_data.get("connected_envs", None),
+                    "Connected Chs": instance_data.get("connected_chs", None),
+                    "Intentions": instance_data.get("intentions", None),
+                    "Beliefs": instance_data.get("beliefs", None),
+                    "Goals": instance_data.get("goals", None),
+                }
+                rows.append(row)
+
+        df = pd.DataFrame(rows, columns=["Time", "Instance", "Cycle", "Decision", "Data","Received Msgs", "Event", "Retrieved Plans", "Events","Intentions", "Running Goal", "Connected Envs", "Connected Chs", "Beliefs", "Goals"])
+        df = df.sort_values(by=["Time","Instance"])
+        
+        if not os.path.exists("reports"):
+            os.makedirs("reports")
+        counter = 1
+        filename = f"{output_file}_{counter}"
+        while os.path.exists(f"reports/{filename}.xlsx"):
+            counter += 1
+            filename = f"{output_file}_{counter}"
+            
+        print("Writing to Excel...")
+        #self.to_excel_with_progress(df, f"reports/{filename}.xlsx")    
+        df.to_excel(f"reports/{filename}.xlsx", index=False)
+    
+    def print_progress_bar(self, percentage, bar_length=40):
+        percentage = min(max(percentage, 0), 100)
+        filled_length = int(bar_length * percentage // 100)
+        bar = '█' * filled_length + '-' * (bar_length - filled_length)
+        sys.stdout.write(f'\r|{bar}| {percentage:.2f}% Complete')
+        sys.stdout.flush()
+        if percentage >= 100:
+            print()
+
+    def write_to_excel(self, df, file_path):
+        df.to_excel(file_path, index=False)
+    
+    def estimate_duration(self, df):
+        sample_size = min(10, len(df)) 
+        sample_df = df.iloc[:sample_size]
+        
+        start_time = time()
+        sample_df.to_excel("sample_output.xlsx", index=False)
+        duration = time() - start_time
+    
+        return (duration / sample_size) * len(df)
+    
+    def to_excel_with_progress(self, df, file_path): 
+        estimated_duration = self.estimate_duration(df)  
+        
+        thread = Thread(target=self.write_to_excel, args=(df, file_path))
+        thread.start()
+        start_time = time()
+        
+        while thread.is_alive():
+            elapsed = time() - start_time
+            if elapsed < estimated_duration:
+                estimated_duration = (1 - 0.05) * estimated_duration + 0.05 * elapsed
+            percentage = min((elapsed / estimated_duration) * 100, 100)
+            self.print_progress_bar(percentage)
+        
+            sleep(0.1)  
+            
+        self.print_progress_bar(100)
+            
     def connect_to(self, agents: list[Agent] | Agent, targets: list[Environment | Channel] | Environment | Channel) -> None:
         if not isinstance(agents, list): 
             agents = [agents]
@@ -283,7 +405,15 @@ class Admin(metaclass=AdminMeta):
             env.show_exec = self.ch_sh_exec
         for ch in self._channels.values():
             ch.show_exec = self.env_sh_exec
-            
+    
+    def block_prints(self):
+        self.printing = False
+        for agent in self._agents.values():
+            agent.printing = False
+        for env in self._environments.values():
+            env.printing = False
+        for ch in self._channels.values():
+            ch.printing = False
 
     def slow_cycle_by(self, time: int | float) -> None:
         for agent in self._agents.values():
