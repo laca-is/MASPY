@@ -347,7 +347,7 @@ if __name__ == "__main__":
     env = SimpleEnv()
     ch = Channel("SimpleChannel")
     Admin().connect_to([agent1,agent2],[env,ch])
-    agent1.add(Goal("say_hello",(agent2.my_name,)))
+    agent1.add(Goal("say_hello",(agent2.str_name,)))
     Admin().start_system()
 ```
 
