@@ -247,19 +247,24 @@ driver = Driver("Drv")
 Admin().connect_to([manager,driver],park_ch)
 ```
 
-The following are the different ways to send messages between agents.
-If ommited, the default channel is used.
+The following are the different directives to send messages between agents.
 
 ```python 
-self.send(target, "tell", Belief, Channel)
-self.send(target, "untell", Belief, Channel)
-self.send(target, "achieve", Goal, Channel)
-self.send(target, "unachieve", Goal, Channel)
-self.send(target, "askOne", Belief, Channel)
-self.send(target, "askAll", Belief, Channel)
-self.send(target, "tellHow", Plan, Channel)
-self.send(target, "untellHow", Plan, Channel)
-self.send(target, "askHow", Plan, Channel)
+self.send(<target>, <directive>, <info>, optional[<channel>])
+
+Directives:
+tell 		-> Add Belief on target
+untell		-> Remove Belief from target
+achieve 	-> Add Goal to target
+unachieve	-> Remove Goal from target
+askOne		-> Ask for Belief from target
+askOneReply	-> Ask for Belief from target and wait for Reply
+askAll		-> Ask for all similar Beliefs from target
+askAllReply	-> Ask for all similar Beliefs from target and wait for Reply
+tellHow		-> Add Plan on target
+untellHow	-> Remove Plan from target
+askHow 		-> Ask for Plan from target
+askHowReply	-> Ask for Plan from target and wait for Reply
 ```
 
 ### Environment
