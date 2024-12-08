@@ -1,5 +1,6 @@
 from threading import Lock
-from typing import Dict, Set, List, TYPE_CHECKING, Union, Any
+from typing import Dict, Set, List, TYPE_CHECKING, Union, Any, Optional
+from maspy.utils import bcolors
 from enum import Enum
 
 if TYPE_CHECKING:
@@ -27,6 +28,12 @@ def is_broadcast(target: Any) -> bool:
 class CommsMultiton(type):
     _instances: Dict[str, "Channel"] = {}
     _lock: Lock = Lock()
+    
+    @classmethod
+    def get_instance(cls, ch_name: str) -> Optional["Channel"]:
+        if ch_name in cls._instances:
+            return cls._instances[ch_name]
+        return None
 
     def __call__(cls, __my_name="default"):
         with cls._lock:
@@ -40,7 +47,9 @@ class Channel(metaclass=CommsMultiton):
     def __init__(self, comm_name:str="default"):
         self.show_exec = False
         self.printing = True
+        self.lock = Lock()
         
+        self.tcolor = ""
         from maspy.admin import Admin
         self._my_name = comm_name
         self.sys_time = Admin().sys_time
@@ -59,7 +68,10 @@ class Channel(metaclass=CommsMultiton):
     def print(self,*args, **kwargs):
         if not self.printing: 
             return
-        return print(f"{self._name}>",*args,**kwargs)
+        f_args = "".join(map(str, args))
+        f_kwargs = "".join(f"{key}={value}" for key, value in kwargs.items())
+        with self.lock:
+            return print(f"{self.tcolor}{self._name}> {f_args}{f_kwargs}{bcolors.ENDCOLOR}")
     
     @property
     def get_info(self):
@@ -74,19 +86,20 @@ class Channel(metaclass=CommsMultiton):
             self._add_agent(agents)
 
     def _add_agent(self, agent: 'Agent'):
-        assert isinstance(agent.my_name, tuple)
+        assert isinstance(agent.tuple_name, tuple)
+        ag_name = f'{agent.tuple_name[0]}_{str(agent.tuple_name[1])}'
         if type(agent).__name__ in self.agent_list:
-            if agent.my_name[0] in self.agent_list[type(agent).__name__]:
-                self.agent_list[type(agent).__name__][agent.my_name[0]].update({agent.str_name})
-                self._agents[agent.str_name] = agent
+            if agent.tuple_name[0] in self.agent_list[type(agent).__name__]:
+                self.agent_list[type(agent).__name__][agent.tuple_name[0]].update({ag_name})
+                self._agents[ag_name] = agent
             else:
-                self.agent_list[type(agent).__name__].update({agent.my_name[0] : {agent.str_name}})
-                self._agents[agent.str_name] = agent
+                self.agent_list[type(agent).__name__].update({agent.tuple_name[0] : {ag_name}})
+                self._agents[ag_name] = agent
         else:
-            self.agent_list[type(agent).__name__] = {agent.my_name[0] : {agent.str_name}}
-            self._agents[agent.str_name] = agent
+            self.agent_list[type(agent).__name__] = {agent.tuple_name[0] : {ag_name}}
+            self._agents[ag_name] = agent
         
-        self.print(f'Connecting agent {type(agent).__name__}:{agent.my_name}') if self.show_exec else ...
+        self.print(f'Connecting agent {type(agent).__name__}:{agent.tuple_name}') if self.show_exec else ...
        
     def _rm_agents(self, agents: Union[List['Agent'],'Agent']):
         if isinstance(agents, list):
@@ -96,12 +109,13 @@ class Channel(metaclass=CommsMultiton):
             self._rm_agent(agents)
 
     def _rm_agent(self, agent: 'Agent'):
-        assert isinstance(agent.my_name, tuple)
-        if agent.my_name in self._agents:
-            del self._agents[agent.str_name]
-            self.agent_list[type(agent).__name__][agent.my_name[0]].remove(agent.str_name)
+        assert isinstance(agent.tuple_name, tuple)
+        ag_name = f'{agent.tuple_name[0]}_{str(agent.tuple_name[1])}'
+        if agent.tuple_name in self._agents:
+            del self._agents[ag_name]
+            self.agent_list[type(agent).__name__][agent.tuple_name[0]].remove(ag_name)
         self.print(
-            f"Desconnecting agent {type(agent).__name__}:{agent.my_name}"
+            f"Desconnecting agent {type(agent).__name__}:{agent.tuple_name}"
         ) if self.show_exec else ...
 
     def _send(self, sender: str, target: str | List[str] | broadcast, act: Act, message: Union['Belief', 'Goal', 'Ask', 'Plan'] | List[Union['Belief', 'Ask', 'Goal', 'Plan']]):  
@@ -153,13 +167,13 @@ class Channel(metaclass=CommsMultiton):
         from maspy.agent import Belief, Goal, Ask, Plan
         try:
             if act in [tell,untell]: 
-                assert isinstance(msg, Belief),f'Act {act} must send Belief'
+                assert isinstance(msg, Belief),f'Act {act.name} must send Belief, sent {msg}'
             elif act in [achieve, unachieve]: 
-                assert isinstance(msg, Goal),f'Act {act} must send Goal'
+                assert isinstance(msg, Goal),f'Act {act.name} must send Goal, sent {msg}'
             elif act in [askOne,askOneReply,askAll,askAllReply,askHow]: 
-                assert isinstance(msg, Ask),f'Act {act} must send Ask' 
+                assert isinstance(msg, Ask),f'Act {act.name} must send Ask, sent {msg}' 
             elif act in [tellHow,untellHow]: 
-                assert isinstance(msg, Plan),f'Act {act} must send Plan'
+                assert isinstance(msg, Plan),f'Act {act.name} must send Plan, sent {msg}'
             self._agents[target].save_msg(act,msg)
         except KeyError:
             self.print(f"Agent {target} not connected")
@@ -167,7 +181,7 @@ class Channel(metaclass=CommsMultiton):
             raise
     
     def parse_sent_msg(self, sender: str, act: Act, msg: Union['Belief', 'Goal', 'Ask', 'Plan']):
-        from maspy.agent import Belief, Goal
+        from maspy.agent import Belief, Goal, Ask
         if isinstance(msg, Belief | Goal) and msg is not None:
             msg = msg.update(source=sender)
         if act in [askOne,askAll] and isinstance(msg, Belief | Goal):

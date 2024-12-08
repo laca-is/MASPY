@@ -1,15 +1,21 @@
 from threading import Lock, Thread
-from typing import Any, Dict, List, Union, Optional
+from typing import Any, Dict, List, Union, Optional, TypeVar
 from collections.abc import Iterable
 from maspy.environment import Environment
 from maspy.communication import Channel
 from maspy.agent import Agent
+from maspy.utils import bcolors
+from maspy.learning.modelling import EnvModel
 import pprint
 import signal
 import pandas as pd # type: ignore
 from time import sleep, time
 import os
 import sys
+
+TAgent = TypeVar('TAgent', bound=Agent)
+TEnv = TypeVar('TEnv', bound=Environment)
+TChannel = TypeVar('TChannel', bound=Channel)
 
 class AdminMeta(type):
     _instances: Dict[str, Any] = {}
@@ -26,7 +32,7 @@ class Admin(metaclass=AdminMeta):
         signal.signal(signal.SIGINT, self.stop_all_agents)
         self.end_of_execution = False
         self._name = f"# {type(self).__name__} #"
-        print("Starting MASPY Program")
+        self.print("Starting MASPY Program")
         self.show_exec = False
         self.agt_sh_exec = False
         self.agt_sh_cycle = False
@@ -38,10 +44,13 @@ class Admin(metaclass=AdminMeta):
         self._agent_list: Dict[tuple, str] = dict()
         self._num_agent: Dict[str, int] = dict()
         self._agents: Dict[tuple, Agent] = dict()
+        self._agent_class_color: Dict[str, str] = dict()
         self._channels: Dict[str, Channel] = dict()
         self._environments: Dict[str, Environment] = dict()
+        self._models: Dict[str, EnvModel] = dict()
         
-        self.system_report = False
+        self.full_report = False
+        self.report = False
         self._report_lock = False
         self.recording = False
         self.record_rate = 5
@@ -49,7 +58,9 @@ class Admin(metaclass=AdminMeta):
         self.system_info: Dict[str, Any] = dict()
         
     def print(self,*args, **kwargs):
-        return print(f"{self._name}>",*args,**kwargs)
+        f_args = "".join(map(str, args))
+        f_kwargs = "".join(f"{key}={value}" for key, value in kwargs.items())
+        return print(f"{bcolors.GOLD}{self._name}> {f_args}{f_kwargs}{bcolors.ENDCOLOR}")
     
     def get_agents(self) -> Dict[tuple, str]:
         return self._agent_list
@@ -64,30 +75,40 @@ class Admin(metaclass=AdminMeta):
             self._add_agent(agents)
     
     def _add_agent(self, agent: Agent) -> None:
-        name: Optional[str | tuple] = None
-        if agent.my_name == ("",0) :
-            name = type(agent).__name__
-        else:
-            name = agent.my_name[0]
+        name: Optional[str | tuple] = agent.my_name
+        # if agent.tuple_name == ("",0) :
+        #     name = type(agent).__name__
+        # else:
+        #     name = agent.tuple_name[0]
             
         assert isinstance(name,str), f"Agent name must be a string, got {type(name)}"
         if name in self._num_agent:
+            self._agents[(name,1)].my_name = f'{name}_1'
             self._num_agent[name] += 1
-            agent.my_name = (name, self._num_agent[name])
+            agent.tuple_name = (name, self._num_agent[name])
+            agent.my_name = f'{name}_{str(self._num_agent[name])}'
         else:
             self._num_agent[name] = 1
-            agent.my_name = (name, 1)
+            agent.tuple_name = (name, 1)
+
         
         #agent.my_name = ("").join(str(x) for x in agent.name_tag)
         
-        self._agent_list[agent.my_name] = type(agent).__name__
-        self._agents[agent.my_name] = agent
+        self._agent_list[agent.tuple_name] = type(agent).__name__
+        self._agents[agent.tuple_name] = agent
         agent.show_exec = self.agt_sh_exec
         agent.show_cycle = self.agt_sh_cycle
         agent.show_prct = self.agt_sh_prct
         agent.show_slct = self.agt_sh_slct
+        if type(agent).__name__ in self._agent_class_color:
+            agent.tcolor = self._agent_class_color[type(agent).__name__]
+        else:
+            color = bcolors.get_color("Agent")
+            self._agent_class_color[type(agent).__name__] = color
+            agent.tcolor = color
+
         self.print(
-            f"Registering Agent {type(agent).__name__}:{agent.my_name}"
+            f"Registering Agent {type(agent).__name__}:{agent.tuple_name}"
         ) if self.show_exec else ...
 
     def rm_agents(
@@ -101,24 +122,32 @@ class Admin(metaclass=AdminMeta):
             self._rm_agent(agents)
 
     def _rm_agent(self, agent: Agent):
-        if agent.my_name in self._agents:
-            assert isinstance(agent.my_name, tuple)
-            del self._agents[agent.my_name]
-            del self._agent_list[agent.my_name]
+        if agent.tuple_name in self._agents:
+            assert isinstance(agent.tuple_name, tuple)
+            del self._agents[agent.tuple_name]
+            del self._agent_list[agent.tuple_name]
         self.print(
-            f"Removing agent {type(agent).__name__}:{agent.my_name} from List"
+            f"Removing agent {type(agent).__name__}:{agent.tuple_name} from List"
         ) if self.show_exec else ...
 
     def _add_channel(self, channel: Channel) -> None:
         self._channels[channel._my_name] = channel
         channel.show_exec = self.ch_sh_exec
+        channel.tcolor = bcolors.get_color("Channel")
         self.print(
             f"Registering {type(channel).__name__}:{channel._my_name}"
+        ) if self.show_exec else ...
+
+    def _add_model(self, model: EnvModel) -> None:
+        self._models[model.name] = model
+        self.print(
+            f"Registering {type(model).__name__}:{model.name}"
         ) if self.show_exec else ...
 
     def _add_environment(self, environment: Environment) -> None:
         self._environments[environment._my_name] = environment
         environment.show_exec = self.env_sh_exec
+        environment.tcolor = bcolors.get_color("Env")
         self.print(
             f"Registering Environment {type(environment).__name__}:{environment._my_name}"
         ) if self.show_exec else ...
@@ -135,7 +164,7 @@ class Admin(metaclass=AdminMeta):
         
         agent_info = dict()
         for agent in self._agents.values():
-            agent_info.update({agent.str_name: agent.get_info})
+            agent_info.update({agent.my_name: agent.get_info})
         
         env_info = dict()
         for env_name, env in self._environments.items():
@@ -156,6 +185,9 @@ class Admin(metaclass=AdminMeta):
 
     def start_system(self:'Admin') -> None:
         no_agents = True
+        for model in self._models.values():
+            model.reset_percepts()
+                
         self.start_time = time()
         
         if self.recording:
@@ -179,12 +211,12 @@ class Admin(metaclass=AdminMeta):
             
             self.stop_all_agents()
         except Exception as e:
-            print(e)
+            self.print(e)
             pass
     
     def running_class_agents(self, cls) -> bool:
         for agent in self._agents.values():
-            if agent.my_name[0] == cls and agent.running:
+            if agent.tuple_name[0] == cls and agent.running:
                 return True
         return False
     
@@ -198,27 +230,27 @@ class Admin(metaclass=AdminMeta):
         buffer = "Still running agent(s):\n"
         flag = False
         for agent in self._agents.values():
-            if agent.running and (cls is None or agent.my_name[0] == cls):
+            if agent.running and (cls is None or agent.tuple_name[0] == cls):
                 flag = True
-                buffer += f"{agent.str_name} | "
+                buffer += f"{agent.my_name} | "
         if flag:
-            print(buffer)
+            self.print(buffer)
             return True
         return False 
 
     def start_agents(
-        self, agents: Union[List[Agent], Agent]
+        self, agents: Union[List[TAgent], TAgent]
     ) -> None:
         if isinstance(agents, list):
             self.print("Starting listed agents")
             for agent in agents:
-                assert isinstance(agent.my_name, tuple)
-                self._start_agent(agent.my_name)
+                assert isinstance(agent.tuple_name, tuple)
+                self._start_agent(agent.tuple_name)
         else:
             assert isinstance(agents, Agent)
-            self.print(f"Starting agent {type(agents).__name__}:{agents.my_name}")
-            assert isinstance(agents.my_name, tuple)
-            self._start_agent(agents.my_name)
+            self.print(f"Starting agent {type(agents).__name__}:{agents.tuple_name}")
+            assert isinstance(agents.tuple_name, tuple)
+            self._start_agent(agents.tuple_name)
 
     def _start_agent(self, agent_name: tuple) -> None:
         try:
@@ -242,15 +274,15 @@ class Admin(metaclass=AdminMeta):
             if agent.running:
                 agent.stop_cycle(False)
             
-        print("Ending MASPY Program")
+        self.print("Ending MASPY Program")
         if self.recording:
             #json_string = json.dumps(self.system_info, indent=2)
             pprint.pprint(self.system_info, indent=2, sort_dicts=False)
-        if self.system_report and not self._report_lock:
+        if (self.full_report or self.report) and not self._report_lock:
             self._report_lock = True
-            print("Making System Report...")
+            self.print("Making System Report...")
             self._print_report()
-            print("System Report Completed")
+            self.print("System Report Completed")
         os._exit(0)
     
     def _print_report(self) -> None:
@@ -269,9 +301,9 @@ class Admin(metaclass=AdminMeta):
             for key, value in instance.cycle_log.items():
                 for idx, log in enumerate(value):
                     if len(value) > 1:
-                        instance_name = f"{instance.str_name} ({idx})"
+                        instance_name = f"{instance.my_name} ({idx})"
                     else:
-                        instance_name = instance.str_name
+                        instance_name = instance.my_name
                     if key in log_dict:
                         log_dict[key][instance_name] = log
                     else:
@@ -284,7 +316,7 @@ class Admin(metaclass=AdminMeta):
         rows = []
         total_iterations = sum(len(instances) for instances in data_dict.values())
         processed_iterations = 0
-        print("Managing Data...")
+        self.print("Managing Data...")
         for sys_time, instances in data_dict.items():
             assert isinstance(instances, dict)
             for instance, instance_data in instances.items():
@@ -296,11 +328,12 @@ class Admin(metaclass=AdminMeta):
                     "Time": sys_time,
                     "Instance": instance,
                     "Cycle": instance_data.get("cycle", None),
-                    "Decision": instance_data.get("decision", None),
-                    "Data": instance_data.get("data", None),
-                    "Running Goal": instance_data.get("running_goal", None),
+                    "Operation": instance_data.get("decision", None),
+                    "Description": instance_data.get("description", None),
+                    "Completed Goal": instance_data.get("running_goal", None),
                     "Received Msgs": instance_data.get("last_recv", None),
                     "Event": instance_data.get("event", None),
+                    "Completed Event": instance_data.get("last_event", None),
                     "Retrieved Plans": instance_data.get("retrieved_plans", None),
                     "Events": instance_data.get("events", None),
                     "Connected Envs": instance_data.get("connected_envs", None),
@@ -310,9 +343,14 @@ class Admin(metaclass=AdminMeta):
                     "Goals": instance_data.get("goals", None),
                 }
                 rows.append(row)
+        if self.full_report:
+            df = pd.DataFrame(rows, columns=["Time", "Instance", "Cycle", "Operation", "Description", "Received Msgs", "Event", "Retrieved Plans", "Events","Intentions", "Completed Event", "Connected Envs", "Connected Chs", "Beliefs", "Goals"])
+        elif self.report:
+            df = pd.DataFrame(rows, columns=["Time", "Instance", "Cycle", "Operation", "Description"])
+            
+        df['Instance_numeric'] = df['Instance'].str.extract(r'_(\d+)$').fillna(0).astype(int)
+        df = df.sort_values(by=["Time","Instance_numeric"]).drop(columns='Instance_numeric')
 
-        df = pd.DataFrame(rows, columns=["Time", "Instance", "Cycle", "Decision", "Data","Received Msgs", "Event", "Retrieved Plans", "Events","Intentions", "Running Goal", "Connected Envs", "Connected Chs", "Beliefs", "Goals"])
-        df = df.sort_values(by=["Time","Instance"])
         
         if not os.path.exists("reports"):
             os.makedirs("reports")
@@ -322,7 +360,7 @@ class Admin(metaclass=AdminMeta):
             counter += 1
             filename = f"{output_file}_{counter}"
             
-        print("Writing to Excel...")
+        self.print("Writing to Excel...")
         #self.to_excel_with_progress(df, f"reports/{filename}.xlsx")    
         df.to_excel(f"reports/{filename}.xlsx", index=False)
     
@@ -366,20 +404,14 @@ class Admin(metaclass=AdminMeta):
             
         self.print_progress_bar(100)
             
-    def connect_to(self, agents: list[Agent] | Agent, targets: list[Environment | Channel] | Environment | Channel) -> None:
+    def connect_to(self, agents: list[TAgent] | TAgent, targets: list[TEnv | Environment | TChannel | Channel | str] | Environment | Channel | str) -> None:
         if not isinstance(agents, list): 
             agents = [agents]
         if not isinstance(targets, list): 
             targets = [targets]
         for agent in agents:
             for target in targets:
-                match target:
-                    case Environment():
-                        agent._environments[target._my_name] = target
-                    case Channel():
-                        agent._channels[target._my_name] = target
-                
-                target._add_agent(agent)
+                agent.connect_to(target)
 
     def set_logging(self, show_exec: bool, show_cycle: bool=False,
                     show_prct: bool=False, show_slct: bool=False, 

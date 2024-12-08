@@ -3,15 +3,16 @@ import ctypes
 from dataclasses import dataclass, field
 from maspy.environment import Environment, Percept	
 from maspy.communication import Channel, Act
-#from maspy.learning.core import Learning
+from maspy.learning import EnvModel
 from maspy.error import (
     InvalidBeliefError,
     InvalidPlanError,
     RunPlanError,
 )
-from maspy.utils import set_changes, merge_dicts, manual_deepcopy
+from maspy.utils import set_changes, merge_dicts, manual_deepcopy, bcolors
 from typing import List, Optional, Dict, Set, Any, Union, Type, cast
 from collections.abc import Iterable, Callable
+from functools import wraps
 from time import sleep
 from enum import Enum
 import importlib as implib
@@ -24,6 +25,16 @@ Event_Change = Enum('gain | lose | test', ['gain', 'lose', 'test']) # type: igno
 gain = Event_Change.gain
 lose = Event_Change.lose
 test = Event_Change.test
+
+Operation = Enum('add | rm', ['add', 'rm']) # type: ignore[misc]
+
+add = Operation.add
+rm = Operation.rm
+
+Option = Enum('ignore | focus', ['ignore', 'focus']) # type: ignore[misc]
+
+ignore = Option.ignore
+focus = Option.focus
 
 DEFAULT_SOURCE = "self"
 DEFAULT_CHANNEL = "default"
@@ -98,8 +109,11 @@ class Belief:
 
         return hash((self.key, args_tuple, self.source))
     
+    def __invert__(self):
+        return False,self
+    
     def __str__(self) -> str:
-        return f'Belief{self.key,self.args,self.source}'
+        return f'Belief {self.key}({self.args})[{self.source}]'
     
     def __repr__(self):
         return self.__str__()
@@ -174,7 +188,7 @@ class Goal:
         return hash((self.key, args_tuple, self.source))
     
     def __str__(self) -> str:
-        return f"Goal{self.key,self.args,self.source}"
+        return f"Goal {self.key}({self.args})[{self.source}]"
     
     def __repr__(self):
         return self.__str__()
@@ -185,7 +199,7 @@ class Event:
     data: Belief | Goal = field(default_factory=Belief)
     
     def __str__(self) -> str:
-        return f"{self.change.name}:{self.data}"
+        return f"{self.change.name} : {self.data}"
     
     def __repr__(self):
         return self.__str__()
@@ -193,8 +207,9 @@ class Event:
 @dataclass
 class Plan:
     trigger: Event = field(default_factory=Event)
-    context: List[Belief | Goal] = field(default_factory=list)
+    context: List[tuple[bool, Belief | Goal]] = field(default_factory=list)
     body: Callable = lambda _: {}
+    conditions: tuple[Callable[..., Any], ...] = (lambda _: {},)
     ev_ctrl: threading.Event = threading.Event()
     
     def __str__(self) -> str:
@@ -202,6 +217,15 @@ class Plan:
     
     def __repr__(self):
         return self.__str__()
+
+    def executable(self, *args, **kwargs):
+        for condition in self.conditions:
+            try:
+                if not condition(*args, **kwargs):
+                    return False
+            except Exception as e:
+                return False
+        return True
     
 @dataclass
 class Ask:
@@ -221,36 +245,49 @@ MSG = Belief | Ask | Goal | Plan | List[Belief | Ask | Goal | Plan]
 _type_env_set = {Environment, "environment", "envrmnt", "env"}
 _type_ch_set = {Channel, "channel", "chnnl", "ch", "c"}
 
-def pl(change: Event_Change, data: Belief | Goal, context: Belief | Goal | List[Belief | Goal] = []):
+def pl(change: Event_Change, data: Belief | Goal, context: Belief | Goal | List[Belief | Goal] = [], *condition: Callable):
     class decorator:
         def __init__(self,func):
             self.func = func
-                
+  
         def __set_name__(self, instance: Agent, name: str):
-            if not isinstance(data, Belief | Goal):
+            if not isinstance(change, Event_Change) or not isinstance(data, Belief | Goal):
                 raise TypeError
+            
+            list_context: List[tuple[bool, Belief | Goal]]
+            
             if isinstance(context, Belief | Goal):
-                list_context = [context]
+                list_context = [(True,context)]
+            
             if isinstance(context, Iterable):
-                list_context = context
-                for ctxt in list_context:
+                list_context = []
+                for ctxt in context:
                     if isinstance(ctxt, Belief | Goal):
-                        continue
+                        list_context.append((True,ctxt))
+                    elif isinstance(ctxt, tuple) and len(ctxt) == 2 and isinstance(ctxt[0], bool) and isinstance(ctxt[1], Belief | Goal):
+                        list_context.append(ctxt)
+                    elif ctxt is False:
+                        list_context.append(context)
+                        break
                     else:
                         raise Exception(f'Invalid type {type(ctxt)}:{ctxt} - was expecting Belief or Goal')
             
             event = Event(change,data)
-            plan = Plan(event,list_context,self.func)
+            plan = Plan(event,list_context,self.func,condition)
             try:
                 instance._plans += [plan]
             except AttributeError:
                 instance._plans = [plan]
+            
+        def __call__(*args, **kwargs):
+            print(f'{args} {kwargs}')
+        
     return decorator
 
-class Agent:
+class Agent: 
     def __init__(
         self,
-        name: str = "",
+        name: Optional[str] = None,
         beliefs: Optional[Iterable[Belief] | Belief] = None,
         goals: Optional[Iterable[Goal] | Goal] = None,
         show_exec = False,
@@ -274,11 +311,13 @@ class Agent:
         
         from maspy.admin import Admin
         self.unique: bool = False
+        self.tcolor = ""
         if name is None:
-            name = ""
-        self.my_name: tuple[str, int] = (name, 0)
+            name = type(self).__name__
+        self.tuple_name: tuple[str, int] = (name, 0)
+        self.my_name = name
+        print(f"Agent {self.my_name} created")
         Admin().add_agents(self)
-        self.str_name = '_'.join([self.my_name[0],str(self.my_name[1])])
         self.sys_time = Admin().sys_time
         
         self.delay: int|float = 0.000001
@@ -296,8 +335,7 @@ class Agent:
         self._channels: Dict[str, Channel] = dict()
         self._dicts: Dict[str, Union[Dict[str, Environment], Dict[str, Channel]]] = {"environment":self._environments, "channel":self._channels}
         
-        # self._learning_models: Dict[str, Learning] = dict()
-        #, "Learning":self._learning_models}
+        self._strategies: list[EnvModel] = []
 
         self.max_intentions: int = nax_intentions
         self.last_intention: tuple[Plan, Event, tuple] = (Plan(), Event(), tuple())
@@ -314,6 +352,7 @@ class Agent:
         self.goal_list: List[Goal] = []
         self.last_goal: Goal | None = None
         self.running_goal: Goal | None = None
+        self.percept_filter: Dict[str, set[str]] = {ignore.name: set(), focus.name: set()}
         
         self.last_sent: list[tuple[str, str | List[str], str, MSG]] = []
         self.last_recv: list[tuple[str, MSG]] = []
@@ -342,10 +381,10 @@ class Agent:
     def print(self,*args, **kwargs):
         if not self.printing:
             return
-        if self.unique:
-            return print(f"Agent:{self.my_name[0]}>",*args,**kwargs)
-        else:
-            return print(f"Agent:{self.str_name}>",*args,**kwargs)
+        f_args = "".join(map(str, args))
+        f_kwargs = "".join(f"{key}={value}" for key, value in kwargs.items())
+        with self.lock:
+            return print(f"{self.tcolor}Agent:{self.my_name}> {f_args}{f_kwargs}{bcolors.ENDCOLOR}")
         
     @property
     def print_beliefs(self):
@@ -383,8 +422,29 @@ class Agent:
             buffer += f"\n\t{plan}"
         self.print(buffer)
     
+    def filter_perceptions(self, operation: Operation, option: Option, group: str | list[str]):
+        assert isinstance(operation,Operation), f"Invalid operation. Choose {Operation}."
+        assert isinstance(option,Option), f"Invalid option. Choose {Option}."
+
+        if isinstance(group, str):
+            group = [group]
             
+        option_str = option.name
+        print(f'{operation} {option_str} {group} to filter.')
+        for g in group:
+            if operation == Operation.add:
+                self.percept_filter[option_str].add(g)
+            elif operation == Operation.rm and g in self.percept_filter[option_str]:
+                self.percept_filter[option_str].remove(g)
+            else:
+                self.print(f"{g} not in {option_str} filter.")
+    
     def connect_to(self, target: Environment | Channel | str):
+        if isinstance(target, str):
+            instance = Environment.get_instance(target) or Channel.get_instance(target)
+            if instance:
+                target = instance
+                
         if isinstance(target, str):
             classes: List[tuple] = []
             try:
@@ -413,8 +473,12 @@ class Agent:
         target.add_agents(self)
         return target
 
-    def disconnect_from(self, target: Channel | Environment):
-        
+    def disconnect_from(self, target: Channel | Environment | str):
+        if isinstance(target, str):
+            instance = Environment.get_instance(target) or Channel.get_instance(target)
+            if instance:
+                target = instance
+                
         match target:
             case Environment():
                 with self.lock:
@@ -425,8 +489,10 @@ class Agent:
                     target._rm_agent(self)
                     del self._channels[target._my_name]
                 
-    def get_env(self, env_name: str):
-        return self._environments[env_name]
+    def add_policy(self, policy: EnvModel):
+        self.print(f"Adding model for {policy.name}")
+        self._strategies.append(policy)
+        self.connect_to(Environment(policy.name))
     
     def add_plan(self, plan: Plan | List[Plan]):
         plans = self._clean_plans(plan)
@@ -498,7 +564,7 @@ class Agent:
                 self.goal_list.remove(data_type)
         
     def add(self, data_type: Belief | Goal | Iterable[Belief | Goal], instant: bool = False):
-        self.save_cycle_log("Adding Info",f'{data_type} instant[{instant}]')
+        self.save_cycle_log("Adding Info", self._format_data("Adding Info", data_type=data_type,instant=instant))
         if self.running is False:
             instant = False
         self.print(f"Adding {data_type}") if self.show_exec else ...
@@ -591,7 +657,7 @@ class Agent:
             caller_frame = current_frame.f_back
             assert caller_frame is not None
             caller_function_name = caller_frame.f_code.co_name
-            if caller_function_name in {'_retrieve_plans','recieve_msg','_select_plan'}:
+            if caller_function_name in {'_retrieve_plans','recieve_msg','_retrieve_context','_select_plan','has'}:
                 return None
             if data_type == search_with:
                 self.print(f'Does not contain {type(data_type).__qualname__} like {data_type}. Searched during {caller_function_name}()')
@@ -713,12 +779,12 @@ class Agent:
             self.print(f"{buffer} >> Different args length") if self.show_slct else ...
             return False
         for arg1,arg2 in zip(data1._args,data2._args):
-            if isinstance(arg1,str) and (arg1[0].isupper()):
+            #if isinstance(arg1,str) and (arg1[0].isupper()):
                 #if arg1 == arg2 and :
-                continue
-            elif isinstance(arg2,str) and (arg2[0].isupper()):
-                continue
-            elif arg1 == arg2:
+            #    continue
+            #elif isinstance(arg2,str) and (arg2[0].isupper()):
+            #    continue
+            if arg1 is Any or arg2 is Any or arg1 == arg2:
                 continue
             else:
                 self.print(f"{buffer} >> Different args {arg1} x {arg2}") if self.show_slct else ...
@@ -731,13 +797,13 @@ class Agent:
         if type(target) is str and not target.split("_")[-1].isdigit():
             target = f"{target}_1"
         try:
-            if msg_act.name in [Act.askOneReply, Act.askAllReply]:
+            if msg_act.name in ['askOneReply','askAllReply']:
                 with self.lock:
                     assert isinstance(msg, Belief | Goal)
-                    msg = Ask(msg, self.str_name)
+                    msg = Ask(msg, self.my_name)
                     
-                self._channels[channel]._send(self.str_name,target,msg_act,msg)
-                self.last_sent.append((self.str_name,target,msg_act.name,msg))
+                self._channels[channel]._send(self.my_name,target,msg_act,msg)
+                self.last_sent.append((self.my_name,target,msg_act.name,msg))
                 msg.reply_event.wait()
                 
                 if msg.reply_content is not None:
@@ -747,16 +813,16 @@ class Agent:
                     self.print(f"Timeout while waiting for reply for {msg}")
                     return None
             else:
-                self._channels[channel]._send(self.str_name,target,msg_act,msg)
-                self.last_sent.append((self.str_name,target,msg_act.name,msg))
+                self._channels[channel]._send(self.my_name,target,msg_act,msg)
+                self.last_sent.append((self.my_name,target,msg_act.name,msg))
             
-            ch = ""
+            ch = "in the default channel"
             if channel != DEFAULT_CHANNEL:
-                ch = f" in ch:{channel}"
+                ch = f" in the channel {channel}"
             if type(target) is str: 
-                self.save_cycle_log("Send Message", f' {self.str_name}  to  {target}  <{msg_act.name}>{msg}{ch}')
+                self.save_cycle_log("Send Message", f' {self.my_name}  to  {target}  -  {msg_act.name} {msg}{ch}')
             else:
-                self.save_cycle_log("Send Message", f' {self.str_name}  broadcasting  <{msg_act.name}>{msg}{ch}')
+                self.save_cycle_log("Send Message", f' {self.my_name}  broadcasting  {msg_act.name} {msg}{ch}')
         except KeyError:
             self.print(f"Not Connected to Selected Channel:{channel}")
         except AssertionError:
@@ -794,37 +860,37 @@ class Agent:
                     break
 
     def recieve_msg(self, act: Act, msg: MSG) -> None:
-        match act:
-            case Act.tell:
+        match act.name:
+            case 'tell':
                 assert isinstance(msg, Belief),f'Act tell must receive Belief not {type(msg).__qualname__}'
                 self.add(msg, False)
                 
-            case Act.achieve:
+            case 'achieve':
                 assert isinstance(msg, Goal),f'Act achieve must receive Goal not {type(msg).__qualname__}'
                 self.add(msg, False)
                 
-            case Act.untell:
+            case 'untell':
                 assert isinstance(msg, Belief),f'Act untell must receive Belief not {type(msg).__qualname__}'
                 self.rm(msg, False)
                 
-            case Act.unachieve:
+            case 'unachieve':
                 assert isinstance(msg, Goal),f'Act unachieve must receive Goal not {type(msg).__qualname__}'
                 self.rm(msg, False)
                 
-            case Act.askOne:
+            case 'askOne':
                 assert isinstance(msg, Ask), f'Act askOne must request an Ask not {type(msg).__qualname__}'
                 found_data = self.get(msg.data_type,ck_src=False)
                 assert isinstance(found_data, Belief)
                 self.send(msg.source, Act.tell, found_data)
             
-            case Act.askOneReply:
+            case 'askOneReply':
                 assert isinstance(msg, Ask), f'Act askOneReply must request an Ask not {type(msg).__qualname__}'
                 found_data = self.get(msg.data_type,ck_src=False)
                 assert isinstance(found_data, Belief)
                 msg.reply_content = found_data
                 msg.reply_event.set()
                 
-            case Act.askAll:
+            case 'askAll':
                 assert isinstance(msg, Ask), f'Act askAll must request an Ask not {type(msg).__qualname__}'
                 found_data = self.get(msg.data_type,all=True,ck_src=False)
                 assert isinstance(found_data, list)
@@ -832,22 +898,22 @@ class Agent:
                     assert isinstance(data, Belief)
                     self.send(msg.source, Act.tell, data)
                     
-            case Act.askAllReply:
+            case 'askAllReply':
                 assert isinstance(msg, Ask), f'Act askAllReply must request an Ask not {type(msg).__qualname__}'
                 found_data = self.get(msg.data_type,all=True,ck_src=False)
                 assert isinstance(found_data, list)
                 msg.reply_content = cast(List[Belief|Goal], found_data)
                 msg.reply_event.set()
                     
-            case Act.tellHow:
+            case 'tellHow':
                 assert isinstance(msg, Plan), f'Act tellHow must receive a Plan not {type(msg).__qualname__}'
                 self.add_plan(msg)
 
-            case Act.untellHow:
+            case 'untellHow':
                 assert isinstance(msg, Plan), f'Act untellHow must receive a Plan not {type(msg).__qualname__}'
                 self.rm_plan(msg)
 
-            case Act.askHow:
+            case 'askHow':
                 assert isinstance(msg, Ask), f'Act askHow must request an Ask not {type(msg).__qualname__}'
                 found_plans = self.get(Plan(Event(test,msg.data_type)),all=True,ck_chng=False)
                 assert isinstance(found_plans, list)
@@ -857,41 +923,51 @@ class Agent:
             case _:
                 TypeError(f"Unknown type of message {act}:{msg}")
     
-    def find_in(self, 
-            agent_name: str | List[str], 
-            cls_type: str = "channel", 
-            cls_name: str = "default", 
-            cls_instance: Environment | Channel | None = None
-        ) -> dict[str, Set[str]] | Set[str] | None:
-        if isinstance(cls_type, str) and cls_type != "channel":
+    def list_agents(self, 
+            agent_class: str | List[str], 
+            cls_type: Optional[str] = None,
+            cls_name: Optional[str] = None, 
+        ) -> list[str] | None:
+        
+        if isinstance(agent_class, str):
+            agent_class = [agent_class]
+            
+        if isinstance(cls_type, str):
             cls_type = cls_type.lower()
             if cls_type in _type_env_set:
                 cls_type = "environment"
             elif cls_type in _type_ch_set:
                 cls_type = "channel"
             else:
-                return None               
-            
-        agents: Dict[str, Dict[str, Set[str]]]
-        if cls_instance:
-            agents = manual_deepcopy(cls_instance.agent_list)
-        else:
-            try:
-                agents = manual_deepcopy(self._dicts[cls_type.lower()][cls_name].agent_list)
-            except KeyError as ke:
-                self.print(f"Not connected to {cls_type}:{cls_name}:{ke}")
-                return None
+                self.print(f"Unexpected environment or channel nomeclature: {cls_type}")
+                return None  
         
-        match agent_name:
-            case list():
-                assert len(agent_name) == 2, "Agent name list must be two: [class name and instance name]"
-                agt_dict = agents[agent_name[0]]
-                return agt_dict[agent_name[1]]
-            case str():
-                return agents[agent_name]
-            case _:
-                return None
-            
+        agents : list[Dict[Any, set[Any]]] = []
+        for ag_cls in agent_class:
+            if cls_type == "environment" or cls_type is None: 
+                if cls_name is not None and cls_name in self._environments:
+                    if ag_cls in self._environments[cls_name].agent_list :
+                        agents.append(manual_deepcopy(self._environments[cls_name].agent_list)[ag_cls])
+                else:
+                    for env in self._environments.values():
+                        if ag_cls in env.agent_list:
+                            agents.append(manual_deepcopy(env.agent_list)[ag_cls])
+                                    
+            if cls_type == "channel" or cls_type is None:   
+                if cls_name is not None and cls_name in self._channels:
+                    if ag_cls in self._channels[cls_name].agent_list:
+                        agents.append(manual_deepcopy(self._channels[cls_name].agent_list)[ag_cls])
+                else:
+                    for ch in self._channels.values():
+                        if ag_cls in ch.agent_list:
+                            agents.append(manual_deepcopy(ch.agent_list)[ag_cls])    
+        list_of_agents = []
+        for ag_dict in agents: 
+            for ag_set in ag_dict.values():
+                for ag in ag_set:
+                    list_of_agents.append(ag)
+        return list_of_agents    
+    
     def action(self,env_name:str) -> Environment | None:
         try:
             env = self._environments[env_name]
@@ -905,9 +981,9 @@ class Agent:
             if hasattr(instance, name):
                 method = getattr(instance, name)
                 def wrapper(*args, **kwargs):
-                    return method(self.str_name, *args, **kwargs)   
+                    return method(self.my_name, *args, **kwargs)   
                 return wrapper
-        raise AttributeError(f"{self.str_name} doesnt have the method '{name}' and is not connected to any environment with the method '{name}'.")
+        raise AttributeError(f"{self.my_name} doesnt have the method '{name}' and is not connected to any environment with the method '{name}'.")
     
     def reasoning(self) -> None:
         self.running = True
@@ -924,7 +1000,7 @@ class Agent:
         self.paused_agent = True
                  
     def cycle(self, stop_flag: threading.Event) -> None:
-        self.cycle_counter = 0
+        self.cycle_counter = 1
         while not stop_flag.is_set():   
             self.print("#### New cycle ####") if self.show_cycle else ...
             self._perception()   
@@ -933,21 +1009,34 @@ class Agent:
             self.print(f"Selected event: {event} in {self.__events}") if self.show_cycle else ...
             plans = self._retrieve_plans(event)
             self.print(f"Selected plans: {plans} in {self._plans}") if self.show_cycle else ...
-            chosen_plan, trgr, args = self._select_intention(plans,event)
-            self.print(f"Selected intention to run: {chosen_plan} with {args} arguments") if self.show_cycle else ...
             
+            if len(self.__running_intentions) < self.max_intentions:
+                chosen_plan, trgr, args = self._select_intention(plans,event)
+                self.print(f"Selected intention to run: {chosen_plan} with {args} arguments") if self.show_cycle else ...
+            else:
+                self.print(f"Running intention: {self.__running_intentions[0][0]} with {self.__running_intentions[0][2]} arguments") if self.show_cycle else ...
+            
+            description: Any
             if chosen_plan is not None and trgr is not None:
                 decision = "Execute Intention"
-                data = f' {chosen_plan}, source[{trgr.data.source}], args{args}'
+                description = self._format_data(decision,chosen_plan,trgr,args)
             elif len(self.__running_intentions) >= 1:
                 decision = "Running Intention"
-                data = f'{self.__running_intentions[0]}'
+                description = self._format_data(decision,*self.__running_intentions[0])
+            elif self._strategies:
+                for strat in self._strategies:
+                    state = strat.get_state()
+                    action = strat.get_action(state)
+                    env = self._environments[strat.name]
+                    str_action = strat.actions_list[action]
+                    strat.actions_dict[str_action].func(env, self.my_name, str_action)
+                    decision = "Execute Strategy"
+                    description = f'state: {state} action:{str_action}'
             else:
                 decision = "No Intention"
-                data = None
+                description = self._format_data(decision,trgr=event)
                 
-            self.save_cycle_log(decision, data, event, plans)
-            
+            self.save_cycle_log(decision, description, event, plans)
             
             if stop_flag.is_set():
                 break
@@ -963,11 +1052,27 @@ class Agent:
             for env_name in self._environments:
                 self.print(f"Percepting '{env_name}'") if self.show_cycle and not self.show_prct else ...
                 percepts = self._environments[env_name].perception()
+                percepts = self._apply_filters(percepts,env_name)
                 self.print(f"Percepting {env_name} : {percepts}") if self.show_prct else ...
                 merge_dicts(percepts,percept_dict)
+            if percept_dict == {}:
+                return
             belief_dict: Dict[str, Dict[str, Set[Belief]]] = self._percepts_to_beliefs(percept_dict)
             self._revise_beliefs(belief_dict)
     
+    def _apply_filters(self, percepts: Dict[str, Dict[str, Set[Percept]]], env_name: str):
+        filtered_percepts: Dict[str, Dict[str, Set[Percept]]] = dict()
+        focusing = True if len(self.percept_filter['focus']) > 0 else False
+        for group, keys in percepts.items():
+            if (focusing and group in self.percept_filter['focus']) or (not focusing and group not in self.percept_filter['ignore']):
+                if env_name in filtered_percepts:
+                    for key, value in keys.items():
+                        filtered_percepts[env_name].setdefault(key, set()).update(value)
+                else:
+                    filtered_percepts[env_name] = keys
+            
+        return filtered_percepts
+
     def perceive(self, env_name: str | List[str]) -> None:
         if env_name == "all":
             self._perception()
@@ -978,6 +1083,7 @@ class Agent:
             for name in env_name:
                 try:
                     percepts = self._environments[name].perception()
+                    percepts = self._apply_filters(percepts,name)
                     self.print(f"Percepting '{name}'") if not self.show_prct else self.print(f"Percepting '{name}'")
                     merge_dicts(percepts,percept_dict)
                 except KeyError:
@@ -985,6 +1091,7 @@ class Agent:
         else:
             try:
                 percept_dict = self._environments[env_name].perception()
+                percept_dict = self._apply_filters(percept_dict,env_name)
                 self.print(f"Percepting '{env_name}' : {percept_dict}") if self.show_prct else ...
             except KeyError:
                 self.print(f"Not Connected to Environment:{env_name}")
@@ -1066,7 +1173,7 @@ class Agent:
                 ev_args = event.data._args
             else:
                 ev_args = (event.data._args,)
-            self.save_cycle_log("Instant Plan", (plan,event, " trigger:",event, " args:",ev_args+args),event,plans)
+            self.save_cycle_log("Instant Plan", self._format_data("Instant Plan",plan,event,ev_args+args),event,plans)
             self._run_plan(plan,event,ev_args+args,True)
         elif type(event.data) is Goal:
             self.print(f"Found no applicable plan for {event.change.name}:{event.data}")
@@ -1101,9 +1208,12 @@ class Agent:
                     args = ev_args
                 else:
                     args = ev_args+ctxt
+                    
+                #print(f'{plan.trigger} {plan.executable(*args)}')
                 
-                self.__intentions.append((plan,event,args))
-                break
+                if plan.executable(*args):
+                    self.__intentions.append((plan,event,args))
+                    break
         try:
             plan, trigger, args = self.__intentions.pop(0)
             return plan, trigger, args
@@ -1114,11 +1224,15 @@ class Agent:
     def _retrieve_context(self, plan: Plan) -> tuple | None:
         args: tuple = tuple()
         for context in plan.context:
-            ctxt = self.get(context,ck_src=False) 
-            if ctxt is None: 
+            ctxt = self.get(context[1],ck_src=False) 
+            if ctxt is None:
+                if context[0] is False: 
+                    continue
                 break
-            assert isinstance(ctxt, Belief | Goal), f"Unexpected Context Type: {type(ctxt)}, Expected Belief | Goal" 
-            if ctxt.args_len == 1:
+            assert isinstance(ctxt, Belief | Goal), f"Unexpected Context Type: {type(ctxt)}, Expected Belief | Goal"
+            if ctxt.args_len == 0: 
+                continue
+            elif ctxt.args_len == 1:
                 args += ctxt._args
             else:
                 args += (ctxt._args,)  
@@ -1156,12 +1270,13 @@ class Agent:
             trigger_type = trigger.data
             if type(trigger_type) is Goal:
                 self.last_goal = trigger_type
+                self.last_event = trigger
                 if trigger_type in self.__goals[trigger_type.source][trigger_type.key]:
                     self.__goals[trigger_type.source][trigger_type.key].remove(trigger_type)
                     self.update_lists(trigger_type,"rm")
                 else:
                     self.print(f"{trigger_type} lost before correct execution")
-            
+                    
             result = plan.body(self, trigger.data.source, *args)
             if not instant_flag:
                 self.__running_intentions.remove((plan,trigger,args))
@@ -1170,7 +1285,7 @@ class Agent:
             self.last_plan = plan
             return result
         except Exception as e:
-            buffer = f"<{self.str_name}> Error while executing {plan}:\n\tTrigger={trigger} | Context={args}\n\t{repr(e)}\n"
+            buffer = f"<{self.my_name}> Error while executing {plan}:\n\tTrigger={trigger} | Context={args}\n\t{repr(e)}\n"
             _, _, exc_traceback = sys.exc_info()
             tb_entries = traceback.extract_tb(exc_traceback)
             
@@ -1192,12 +1307,14 @@ class Agent:
             print(buffer)
             exit(1) 
     
-    def save_cycle_log(self, decision: str, data: Any | None = None, event: Event | None = None, plans: List[Plan] | None = None) -> None:
+    def save_cycle_log(self, decision: str, description: Any | None = None, event: Event | None = None, plans: List[Plan] | None = None) -> None:
         log: Dict[str, Any] = {"cycle":self.cycle_counter}
-        info = {"decision":decision,"data":data,"beliefs":self.belief_list.copy(),"goals":self.goal_list.copy(),"running_goal":self.last_goal,"last_recv":self.last_recv,"event":event, "retrieved_plans":plans,"intentions":self.__intentions.copy(),"events":self.__events.copy(),"connected_envs":list(self._environments.keys()), "connected_chs":list(self._channels.keys())}
+        info = {"decision":decision,"description":description,"beliefs":self.belief_list.copy(),"goals":self.goal_list.copy(),"running_goal":self.last_goal,"last_recv":self.last_recv,"event":event,"last_event":self.last_event,"retrieved_plans":plans,"intentions":self.__intentions.copy(),"events":self.__events.copy(),"connected_envs":list(self._environments.keys()), "connected_chs":list(self._channels.keys())}
         self.last_recv = []
         self.last_goal = None
         if self.last_log != info and (self.running or self.cycle_counter == 0):
+            if self.running is False:
+                log["cycle"] = "Setup"
             self.last_log = info
             log.update(info)
             sys_time = self.sys_time()
@@ -1210,6 +1327,20 @@ class Agent:
     def _stop_plan(self, plan):
         self.print(f"Stoping {plan})")  if self.show_exec else ...
         pass    
+    
+    def _format_data(self, decision: str, chosen_plan: Plan | None = None, trgr: Event | None = None, args: tuple | None = None, data_type: Iterable[Belief | Goal] | Belief | Goal | None = None, instant: bool | None = False) -> str:
+        match decision:
+            case "Adding Info" | "Removing Info":
+                return f'{data_type}  -  instant[{instant}]'
+            case "Execute Intention" | "Running Intention" | "Instant Plan":
+                assert trgr is not None
+                return f' {chosen_plan}, source[{trgr.data.source}], args{args}'
+            case "No Intention":
+                return ""
+            case "Sending Message":
+                return ""
+            
+        return ""
     
     # TODO: should invalid arguments be an error or a warning?
     def _clean(
