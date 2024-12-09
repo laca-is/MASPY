@@ -48,7 +48,7 @@ class bcolors(bcolorsMeta):
     
     Colors_Dict: dict[str, tuple[int,list]] = {
         "Agent": (0,[
-        RED, PURPLE, MAGENTA, ORANGE, TEAL , SALMON, BRT_RED, PINK, BRT_MAGENTA  ]),
+        RED, PURPLE, MAGENTA, ORANGE, TEAL, SALMON, BRT_RED, PINK, BRT_MAGENTA  ]),
         "Env": (0,[GREEN, LIME, BRT_GREEN, LIGHT_GREEN  ]),
         "Channel": (0,[BLUE, TURQUOISE, BRT_BLUE, LIGHT_BLUE ]),
     }

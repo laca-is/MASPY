@@ -113,12 +113,9 @@ class EnvModel(Model):
     def reset_percepts(self):
         self.reset()
         from maspy.environment import Percept
-        self.env.print_percepts
         for stt, (name, values) in zip(self.curr_state, self.env.possible_starts.items()):
             percept = self.env.get(Percept(name),ck_args=False)
-            print(stt, name, values, percept)
             self.env.change(percept, stt)
-        self.env.print_percepts
             
     def add_transition(self, state, results: tuple, action: Any):
         action_idx = self.actions_list.index(action)

@@ -197,7 +197,7 @@ class Environment(metaclass=EnvironmentMultiton):
         for group_keys in self._percepts.values():
             for percept_set in group_keys.values():
                 for percept in percept_set:
-                    percepts += f"{percept}\n"
+                    percepts += f"\t{percept}\n"
         print(f"{percepts}\r")
         
     @property

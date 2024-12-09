@@ -316,7 +316,6 @@ class Agent:
             name = type(self).__name__
         self.tuple_name: tuple[str, int] = (name, 0)
         self.my_name = name
-        print(f"Agent {self.my_name} created")
         Admin().add_agents(self)
         self.sys_time = Admin().sys_time
         
@@ -1026,10 +1025,14 @@ class Agent:
             elif self._strategies:
                 for strat in self._strategies:
                     state = strat.get_state()
-                    action = strat.get_action(state)
+                    int_action = strat.get_action(state)
                     env = self._environments[strat.name]
-                    str_action = strat.actions_list[action]
-                    strat.actions_dict[str_action].func(env, self.my_name, str_action)
+                    str_action = strat.actions_list[int_action]
+                    action = strat.actions_dict[str_action]
+                    if action.act_type == 'single':
+                        action.func(env, self.my_name)
+                    else:
+                        action.func(env, self.my_name, str_action)
                     decision = "Execute Strategy"
                     description = f'state: {state} action:{str_action}'
             else:
