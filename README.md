@@ -225,7 +225,7 @@ class Manager(Agent):
         super().__init__(agt_name,show_exec=False,show_cycle=False)
         self.add(Belief("spotPrice",rnd.randint(12,20),adds_event=False))
 
-    @pl(gain,Goal("sendPrice"),Belief("spotPrice","SP"))
+    @pl(gain,Goal("sendPrice"),Belief("spotPrice", Any))
     def send_price(self,src,spot_price):
         # The agent manager sends a goal to the manager via the Parking channel
         self.send(src,achieve,Goal("checkPrice",spot_price),"Parking")
@@ -317,7 +317,7 @@ class Park(Environment):
             self.change(spot,(spot_id,driver))
 
 class Driver(Agent)
-    @pl(gain,Goal("park",("Park_Name","SpotID")))
+    @pl(gain,Goal("park",("Park_Name", Any)))
     def park_on_spot(self,src,park_name,spot_id):
         # This agent functions makes the connection with an environment or channel
         # Just give it Channel(Name) or Envrionment(Name) to add it to the agent 
@@ -336,7 +336,7 @@ class SimpleEnv(Environment):
         self.print(f"Contact between {agt} and {agent2}")
 
 class SimpleAgent(Agent):
-    @pl(gain,Goal("say_hello","Agent"))
+    @pl(gain,Goal("say_hello", Any))
     def send_hello(self,src,agent):
         self.send(agent,tell,Belief("Hello"),"SimpleChannel")
 
@@ -548,18 +548,14 @@ ___.send(target: str | List[str], act: ACTS, msg: MSG, channel: str = DEFAULT_CH
 Finds another agent's name also connected in an Environment or Channel
 Args:
     agent_name - str or list[str]: The class agent or list containing the class name and instance name.
-    cls_type - str or None: The type of class to search in. Defaults to "channel".	
-    cls_name - str or None: The name of the class to search in. Defaults to "default".
-    cls_instance Environment, Channel or None - An specific instance of the class to search in. Defaults to None.
+    cls_type - str or None: The type of class to search in. Defaults to None.	
+    cls_name - str or None: The name of the class to search in. Defaults to None.
 Returns:
-    dict[str, set[tuple]], set[tuple] or None: A dictionary, set of tuples, or None based on the agent name provided.
-	str -> Agent Class
-	tuple -> (Agent Name, ID)
+    list[str] or None: A list of the names of the agents with the provided specifications.
 """
-___.find_in(agent_name: str | list[str],
-  	    cls_type: str = "channel",
-  	    cls_name: str = "default", 
-            cls_instance: Environment | Channel | None = None)
+___.list_agents(agent_class: str | list[str],
+  	    cls_type: Optional[str] = None,
+  	    cls_name: Optional[str] = None)
 
 """
 Perceives the specified environment(s) and updates the agent's beliefs.
