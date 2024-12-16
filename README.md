@@ -352,38 +352,38 @@ if __name__ == "__main__":
     env = SimpleEnv()
     ch = Channel("SimpleChannel")
     Admin().connect_to([agent1,agent2],[env,ch])
-    agent1.add(Goal("say_hello",(agent2.str_name,)))
+    agent1.add(Goal("say_hello",(agent2.my_name,)))
     Admin().start_system()
 ```
 
 This code will generate the following prints:
 
-    Starting MASPY Program
-    # Admin #> Registering Agent SimpleAgent:('SimpleAgent', 1)
-    # Admin #> Registering Channel:default
-    Channel:default> Connecting agent SimpleAgent:('SimpleAgent', 1)
-    # Admin #> Registering Agent SimpleAgent:('SimpleAgent', 2)
-    Channel:default> Connecting agent SimpleAgent:('SimpleAgent', 2)
-    # Admin #> Registering Environment SimpleEnv:SimpleEnv
-    # Admin #> Registering Channel:SimpleChannel
-    Environment:SimpleEnv> Connecting agent SimpleAgent:('SimpleAgent', 1)
-    Channel:SimpleChannel> Connecting agent SimpleAgent:('SimpleAgent', 1)
-    Environment:SimpleEnv> Connecting agent SimpleAgent:('SimpleAgent', 2)
-    Channel:SimpleChannel> Connecting agent SimpleAgent:('SimpleAgent', 2)
-    Agent:('SimpleAgent', 1)> Adding Goal('say_hello', ('SimpleAgent', 2), 'self')
-    Agent:('SimpleAgent', 1)> New Event: gain:Goal('say_hello', ('SimpleAgent', 2), 'self')
-    # Admin #> Starting Agents
-    Agent:('SimpleAgent', 1)> Running Plan(Event(change='gain', data=Goal(key='say_hello', _args=('Agent',), source='self'), intention=None), [], 'send_hello')
-    Channel:SimpleChannel> ('SimpleAgent', 1) sending tell:Belief('Hello', (), ('SimpleAgent', 1)) to ('SimpleAgent', 2)
-    Agent:('SimpleAgent', 2)> Adding Belief('Hello', (), ('SimpleAgent', 1))
-    Agent:('SimpleAgent', 2)> New Event: gain:Belief('Hello', (), ('SimpleAgent', 1))
-    Agent:('SimpleAgent', 2)> Running Plan(Event(change='gain', data=Belief(key='Hello', _args=(), source='self', adds_event=True), intention=None), [], 'recieve_hello')
-    Agent:('SimpleAgent', 2)> Hello received from ('SimpleAgent', 1)
-    Environment:SimpleEnv> Contact between ('SimpleAgent', 2) and ('SimpleAgent', 1)
-    # Admin #> [Closing System]
-    Agent:('SimpleAgent', 1)> Shutting Down...
-    Agent:('SimpleAgent', 2)> Shutting Down...
-    Ending MASPY Program
+    # Admin #> Starting MASPY Program
+	# Admin #> Registering Agent SimpleAgent:('SimpleAgent', 1)
+	# Admin #> Registering Channel:default
+	Channel:default> Connecting agent SimpleAgent:('SimpleAgent', 1)
+	# Admin #> Registering Agent SimpleAgent:('SimpleAgent', 2)
+	Channel:default> Connecting agent SimpleAgent:('SimpleAgent', 2)
+	# Admin #> Registering Environment SimpleEnv:SimpleEnv
+	# Admin #> Registering Channel:SimpleChannel
+	Environment:SimpleEnv> Connecting agent SimpleAgent:('SimpleAgent', 1)
+	Channel:SimpleChannel> Connecting agent SimpleAgent:('SimpleAgent', 1)
+	Environment:SimpleEnv> Connecting agent SimpleAgent:('SimpleAgent', 2)
+	Channel:SimpleChannel> Connecting agent SimpleAgent:('SimpleAgent', 2)
+	Agent:SimpleAgent_1> Adding Goal say_hello(SimpleAgent_2)[self]
+	Agent:SimpleAgent_1> New Event: gain,Goal say_hello(SimpleAgent_2)[self]
+	# Admin #> Starting Agents
+	Agent:SimpleAgent_1> Running gain : Goal say_hello(typing.Any)[self], [], send_hello() )
+	Channel:SimpleChannel> SimpleAgent_1 sending tell:Belief Hello(())[SimpleAgent_1] to SimpleAgent_2
+	Agent:SimpleAgent_2> Adding Belief Hello(())[SimpleAgent_1]
+	Agent:SimpleAgent_2> New Event: gain,Belief Hello(())[SimpleAgent_1]
+	Agent:SimpleAgent_2> Running gain : Belief Hello(())[self], [], recieve_hello() )
+	Agent:SimpleAgent_2> Hello received from SimpleAgent_1
+	Environment:SimpleEnv> Contact between SimpleAgent_2 and SimpleAgent_1
+	# Admin #> [Closing System]
+	# Admin #> Still running agent(s):
+	SimpleAgent_1 | SimpleAgent_2 |
+	# Admin #> Ending MASPY Program
 
 This program must be terminated using a *ctrl+c*.
 Otherwise the system would continue running indeterminately.
