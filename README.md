@@ -212,7 +212,7 @@ Admin().start_system()
 ```
 In this example, both agents have the same name "Drv". 
 
-For communication to not be ambiguous, the Admin names them ("Drv",1) and ("Drv",2).
+For communication to not be ambiguous, the Admin names them "Drv_1" and "Drv_2".
 
 ### Communication between Agents
 After starting the agents they may use the default channel or be connected to private one.
