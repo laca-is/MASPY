@@ -141,7 +141,7 @@ class EnvironmentMultiton(type):
 
 class Environment(metaclass=EnvironmentMultiton):
     def __init__(self, env_name: Optional[str]=None, full_log: bool=False):
-        self._my_name = env_name if env_name else type(self).__name__
+        self.my_name = env_name if env_name else type(self).__name__
         self.show_exec = full_log
         self.printing = True
         self.lock = Lock()
@@ -155,7 +155,7 @@ class Environment(metaclass=EnvironmentMultiton):
         #  Dict[Agt_fullname, Agt_inst]
         self._agents: Dict[str, 'Agent'] = dict()
         
-        self._name = f"Environment:{self._my_name}"
+        self._name = f"Environment:{self.my_name}"
         #  Dict[env_name, Dict[percept_key, Set[Percept]]]
         self._percepts: Dict[str, Dict[str, Set[Percept]]] = dict()
         

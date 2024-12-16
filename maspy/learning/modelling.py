@@ -27,7 +27,7 @@ single = Group.single
 class EnvModel(Model):
     def __init__(self, env: 'Environment') -> None:
         super().__init__()
-        self.name = env._my_name
+        self.name = env.my_name
         self.env = env
         states = env._states.copy()
         actions = env._actions.copy()
@@ -46,12 +46,12 @@ class EnvModel(Model):
         keys = states.keys()
         value_lists = states.values()
         self.states_list = list(product(*value_lists))
+        self.terminated_states: list[tuple] = []
         
         start_list = list(env.possible_starts.values())
         for percept in env._state_percepts.values():
             if percept.key not in env.possible_starts:
-                start_list.append(list(percept.args))
-                
+                start_list.append(env._states[percept.key])
         normalized = [ 
             [item] if not isinstance(item, (list, tuple, set, str)) 
             else list(item) for item in start_list
@@ -132,8 +132,9 @@ class EnvModel(Model):
                 
         self.P[state][action_idx].append((probability, new_state, reward, terminated))
         
-    def learn(self, learn_method: Learn_Method, learning_rate: float = 0.01, discount_factor: float = 0.8, epsilon: float = 1, final_epsilon: float = 0.1, num_steps: int = 50, num_episodes: int = 10000):
-        self.lerning_rate = learning_rate
+    def learn(self, learn_method: Learn_Method, learning_rate: float = 0.05, discount_factor: float = 0.8, epsilon: float = 1, final_epsilon: float = 0.1, num_steps: int = 50, num_episodes: int = 10000):
+        self.learning_rate = learning_rate
+        self.learning_rate_policy = 0.01
         self.discount_factor = discount_factor
         
         self.epsilon = epsilon
@@ -143,6 +144,8 @@ class EnvModel(Model):
         self.training_error: list = [] 
         
         self.q_table: dict = defaultdict(lambda: np.zeros(self.num_actions))
+        self.value_table: dict = defaultdict(lambda: 0.0)
+        self.policy_table: dict = defaultdict(lambda: np.full(self.num_actions, 1 / self.num_actions))
         
         for _ in range(num_episodes):
             self.reset()
@@ -155,10 +158,13 @@ class EnvModel(Model):
                 match learn_method.name:
                     case "qlearning":
                         self.q_learning_update(old_state, next_state, action, reward, terminated)
+                    case "sarsa":
+                        self.sarsa_update(old_state, next_state, action, reward, terminated)
                     case _:
                         print(f"Unsupported learning method {learn_method}")
                 if terminated:
                     done = True
+                    self.terminated_states.append(next_state)
                 step += 1
             #if step < 50:
             #     print("terminated in ", step, "steps")
@@ -167,11 +173,57 @@ class EnvModel(Model):
         
     def q_learning_update(self, state, next_state, action: int, reward, terminated):
         q_table = (not terminated) * np.max(self.q_table[next_state])
+        
         temp_diff = (
             reward + self.discount_factor * q_table - self.q_table[state][action]
         )
-        self.q_table[state][action] += self.lerning_rate * temp_diff
+        
+        self.q_table[state][action] += self.learning_rate * temp_diff
+        
         self.training_error.append(temp_diff)
+        
+    def sarsa_update(self, state, next_state, action: int, reward, terminated):
+        next_action = self.get_action(next_state)
+        
+        next_q = (not terminated) * self.q_table[next_state][next_action]
+        
+        temp_diff = (
+            reward + self.discount_factor * next_q - self.q_table[state][action]
+        )
+        
+        self.q_table[state][action] += self.learning_rate * temp_diff
+        
+        self.training_error.append(temp_diff)
+
+    def expected_sarsa_update(self, state, next_state, action: int, reward, terminated, policy):
+        if not terminated:
+            expected_q = np.dot(policy[next_state], self.q_table[next_state])
+        else:
+            expected_q = 0
+        
+        temp_diff = (
+            reward + self.discount_factor * expected_q - self.q_table[state][action]
+        )
+        
+        self.q_table[state][action] += self.learning_rate * temp_diff
+        
+        self.training_error.append(temp_diff)
+
+        
+    def actor_critic_update(self, state, next_state, action: int, reward, terminated):
+        current_value = self.value_table[state]
+        next_value = (not terminated) * self.value_table[next_state]
+
+        td_error = reward + self.discount_factor * next_value - current_value
+        
+        self.value_table[state] += self.learning_rate * td_error
+
+        self.policy_table[state][action] += self.learning_rate_policy * td_error
+
+        self.policy_table[state] = self.policy_table[state] / np.sum(self.policy_table[state])
+        
+        self.training_error.append(td_error)
+
         
     def get_action(self, state: tuple | None = None):
         if state is not None:

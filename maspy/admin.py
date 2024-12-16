@@ -131,11 +131,11 @@ class Admin(metaclass=AdminMeta):
         ) if self.show_exec else ...
 
     def _add_channel(self, channel: Channel) -> None:
-        self._channels[channel._my_name] = channel
+        self._channels[channel.my_name] = channel
         channel.show_exec = self.ch_sh_exec
         channel.tcolor = bcolors.get_color("Channel")
         self.print(
-            f"Registering {type(channel).__name__}:{channel._my_name}"
+            f"Registering {type(channel).__name__}:{channel.my_name}"
         ) if self.show_exec else ...
 
     def _add_model(self, model: EnvModel) -> None:
@@ -145,11 +145,11 @@ class Admin(metaclass=AdminMeta):
         ) if self.show_exec else ...
 
     def _add_environment(self, environment: Environment) -> None:
-        self._environments[environment._my_name] = environment
+        self._environments[environment.my_name] = environment
         environment.show_exec = self.env_sh_exec
         environment.tcolor = bcolors.get_color("Env")
         self.print(
-            f"Registering Environment {type(environment).__name__}:{environment._my_name}"
+            f"Registering Environment {type(environment).__name__}:{environment.my_name}"
         ) if self.show_exec else ...
     
     def record_info(self):

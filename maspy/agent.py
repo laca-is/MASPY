@@ -11,7 +11,7 @@ from maspy.error import (
 )
 from maspy.utils import set_changes, merge_dicts, manual_deepcopy, bcolors
 from typing import List, Optional, Dict, Set, Any, Union, Type, cast
-from collections.abc import Iterable, Callable
+from collections.abc import Iterable, Callable, Sequence
 from functools import wraps
 from time import sleep
 from enum import Enum
@@ -111,6 +111,41 @@ class Belief:
     
     def __invert__(self):
         return False,self
+    
+    def __and__(self, other):
+        print(self, "&", other)
+        return 42
+        
+    def __or__(self, other):
+        print(self, "|", other)
+        return 27
+    
+    def __xor__(self, other):    
+        print(self, "^", other)
+        return 4
+    
+    def __lt__(self, other):
+        return self.compare(other, "<")
+        
+    def compare(self, other, comp_t):
+        if not isinstance(other, Sequence):
+            other = [other]
+        for x,y in zip(self._args, other):
+            print(f"comparing {x} with {y}")
+            match comp_t:
+                case "<":
+                    if x < y:
+                        continue
+            break
+        else:
+            return True
+        return False
+    
+    def __ge__(self, other):
+        print(self, ">=", other)
+        return True
+    
+    
     
     def __str__(self) -> str:
         return f'Belief {self.key}({self.args})[{self.source}]'
@@ -462,10 +497,10 @@ class Agent:
         match target:
             case Environment():
                 with self.lock:
-                    self._environments[target._my_name] = target
+                    self._environments[target.my_name] = target
             case Channel():
                 with self.lock:
-                    self._channels[target._my_name] = target
+                    self._channels[target.my_name] = target
             case _:
                 raise Exception(f'Invalid type {type(target)}:{target} - was expecting Channel or Environment')
         
@@ -482,11 +517,11 @@ class Agent:
             case Environment():
                 with self.lock:
                     target._rm_agent(self)
-                    del self._environments[target._my_name]
+                    del self._environments[target.my_name]
             case Channel():
                 with self.lock:
                     target._rm_agent(self)
-                    del self._channels[target._my_name]
+                    del self._channels[target.my_name]
                 
     def add_policy(self, policy: EnvModel):
         self.print(f"Adding model for {policy.name}")
@@ -778,11 +813,6 @@ class Agent:
             self.print(f"{buffer} >> Different args length") if self.show_slct else ...
             return False
         for arg1,arg2 in zip(data1._args,data2._args):
-            #if isinstance(arg1,str) and (arg1[0].isupper()):
-                #if arg1 == arg2 and :
-            #    continue
-            #elif isinstance(arg2,str) and (arg2[0].isupper()):
-            #    continue
             if arg1 is Any or arg2 is Any or arg1 == arg2:
                 continue
             else:
@@ -800,16 +830,20 @@ class Agent:
                 with self.lock:
                     assert isinstance(msg, Belief | Goal)
                     msg = Ask(msg, self.my_name)
-                    
+                
                 self._channels[channel]._send(self.my_name,target,msg_act,msg)
                 self.last_sent.append((self.my_name,target,msg_act.name,msg))
-                msg.reply_event.wait()
+                msg.reply_event.clear()
+                was_set = msg.reply_event.wait()
                 
                 if msg.reply_content is not None:
                     self.add(msg.reply_content, False)
                     return msg.reply_content
+                elif was_set:
+                    self.print(f"No reply for {msg} from {target}") if self.show_exec else ...
+                    return None
                 else:
-                    self.print(f"Timeout while waiting for reply for {msg}")
+                    self.print(f"Timeout while waiting for reply for {msg}") if self.show_exec else ...
                     return None
             else:
                 self._channels[channel]._send(self.my_name,target,msg_act,msg)
@@ -879,14 +913,16 @@ class Agent:
             case 'askOne':
                 assert isinstance(msg, Ask), f'Act askOne must request an Ask not {type(msg).__qualname__}'
                 found_data = self.get(msg.data_type,ck_src=False)
-                assert isinstance(found_data, Belief)
-                self.send(msg.source, Act.tell, found_data)
-            
+                if isinstance(found_data, Belief):
+                    self.send(msg.source, Act.tell, found_data)
+                    
             case 'askOneReply':
                 assert isinstance(msg, Ask), f'Act askOneReply must request an Ask not {type(msg).__qualname__}'
                 found_data = self.get(msg.data_type,ck_src=False)
-                assert isinstance(found_data, Belief)
-                msg.reply_content = found_data
+                if isinstance(found_data, Belief):
+                    msg.reply_content = found_data
+                else:
+                    msg.reply_content = None
                 msg.reply_event.set()
                 
             case 'askAll':
@@ -894,14 +930,16 @@ class Agent:
                 found_data = self.get(msg.data_type,all=True,ck_src=False)
                 assert isinstance(found_data, list)
                 for data in found_data:
-                    assert isinstance(data, Belief)
-                    self.send(msg.source, Act.tell, data)
+                    if isinstance(data, Belief):
+                        self.send(msg.source, Act.tell, data)
                     
             case 'askAllReply':
                 assert isinstance(msg, Ask), f'Act askAllReply must request an Ask not {type(msg).__qualname__}'
                 found_data = self.get(msg.data_type,all=True,ck_src=False)
-                assert isinstance(found_data, list)
-                msg.reply_content = cast(List[Belief|Goal], found_data)
+                if isinstance(found_data, list):
+                    msg.reply_content = cast(List[Belief|Goal], found_data)
+                else:
+                    msg.reply_content = None
                 msg.reply_event.set()
                     
             case 'tellHow':
@@ -1025,6 +1063,8 @@ class Agent:
             elif self._strategies:
                 for strat in self._strategies:
                     state = strat.get_state()
+                    if state in strat.terminated_states:
+                        continue
                     int_action = strat.get_action(state)
                     env = self._environments[strat.name]
                     str_action = strat.actions_list[int_action]
@@ -1035,6 +1075,11 @@ class Agent:
                         action.func(env, self.my_name, str_action)
                     decision = "Execute Strategy"
                     description = f'state: {state} action:{str_action}'
+                    self.print(f"Executing Stretegy: action:{str_action} in state: {state}") if self.show_cycle else ...
+                    break
+                else:
+                    decision = "No Intention"
+                    description = self._format_data(decision,trgr=event)
             else:
                 decision = "No Intention"
                 description = self._format_data(decision,trgr=event)

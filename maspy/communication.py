@@ -51,16 +51,16 @@ class Channel(metaclass=CommsMultiton):
         
         self.tcolor = ""
         from maspy.admin import Admin
-        self._my_name = comm_name
+        self.my_name = comm_name
         self.sys_time = Admin().sys_time
         Admin()._add_channel(self)
         
         from maspy.agent import Belief, Goal, Ask, Plan
         self.data_types = {Belief,Goal,Ask,Plan}
-        self._my_name = comm_name
+        self.my_name = comm_name
         self.agent_list: Dict[str, Dict[str, Set[str]]] = dict()
         self._agents: Dict[str, 'Agent'] = dict()
-        self._name = f"{type(self).__name__}:{self._my_name}"
+        self._name = f"{type(self).__name__}:{self.my_name}"
         self.send_counter = 0
         self.send_counter_agent: Dict[str,int] = dict()
         self.messages_log: Dict[float, List[Dict[str, Any]]] = dict()
