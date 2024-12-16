@@ -190,8 +190,8 @@ class Driver(Agent):
     # This plan will be executed whenever the agent gains the goal "checkPrice"
     # Every plan needs at least self and src, plus the arguments from the trigger and context
     # for this plan, the context is the belief of a budget with wanted and max prices
-    @pl(gain,Goal("checkPrice","Price"),Belief("budget",("WantedPrice","MaxPrice")))
-    def check_price(self,src,given_price,want_price,max_price):
+    @pl(gain,Goal("checkPrice", Any),Belief("budget",(Any, Any)))
+    def check_price(self, src, given_price, budget):
         ...
 
 driver = Driver("Drv")
