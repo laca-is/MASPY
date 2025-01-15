@@ -21,7 +21,7 @@ class Parking(Environment):
             return None
     
     def leave_spot(self, agt):
-        spot = self.get(Percept("spot",("ID",[agt])))
+        spot = self.get(Percept("spot",(Any,[agt])))
         if spot:
             self.print(f"Driver {agt} leaving spot({spot.args[0]})")
             self.change(spot,(spot.args[0],"free"))
