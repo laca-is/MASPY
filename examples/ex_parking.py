@@ -37,12 +37,12 @@ class Manager(Agent):
         self.add(Goal("broadcast_price"))
         self.end_counter = 0
     
-    @pl(gain,Goal("broadcast_price"),Belief("spotPrice","SP"))
+    @pl(gain,Goal("broadcast_price"),Belief("spotPrice", Any))
     def send_price(self,src,spot_price):
         self.print(f"Broadcasting spot price[{spot_price}] to all Agents in Parking Channel.")
         self.send(broadcast,achieve,Goal("checkPrice",spot_price),"Parking")
     
-    @pl(gain,Goal("offer_answer",("Answer","Price")),Belief("minPrice","MP"))
+    @pl(gain,Goal("offer_answer",(Any, Any)),Belief("minPrice", Any))
     def offer_response(self,src,offer_answer,min_price):
         answer, price = offer_answer
         match answer:
@@ -62,7 +62,7 @@ class Manager(Agent):
                     self.print(f"Offered price from {src} accepted[{price}]. Choosing spot.")
                     self.add(Goal("SendSpot",src),True)
     
-    @pl(gain,Goal("SendSpot","Agent"), Belief("spot",("Id","free"),"Parking"))        
+    @pl(gain,Goal("SendSpot", Any), Belief("spot",(Any,"free"),"Parking"))        
     def send_spot(self, src, agent, spot):
         #self.perceive("Parking")
         #free_spots = self.get(Belief("spot",("Id","free"),"Parking"),all=True)
@@ -73,7 +73,7 @@ class Manager(Agent):
         self.print(f"Sending spot({spot_id}) to {agent}")
         self.send(agent,achieve,Goal("park",("Parking",spot_id)),"Parking")
     
-    @pl(gain,Goal("SendSpot","Agent"))
+    @pl(gain,Goal("SendSpot", Any))
     def unavailable_spot(self, src, agent):
         self.print(f"No spots available for {agent}")
         self.send(agent,tell,Belief("no_spots_available"),"Parking")
@@ -88,7 +88,7 @@ class Driver(Agent):
         self.last_price = 0
         self.add(Belief("budget",budget,adds_event=False))
     
-    @pl(gain,Goal("checkPrice","Price"),Belief("budget",("WantedPrice","MaxPrice")))
+    @pl(gain,Goal("checkPrice", Any),Belief("budget",( Any, Any)))
     def check_price(self,src,given_price,budget):
         max_price, want_price = budget
         self.add(Belief("offer_made",given_price,adds_event=False))
@@ -122,7 +122,7 @@ class Driver(Agent):
         self.end_reasoning()
         
     
-    @pl(gain,Goal("park",("Park_Name","SpotID")))
+    @pl(gain,Goal("park",(Any, Any)))
     def park_on_spot(self,src,spot):
         park_name, spot_id = spot
         self.connect_to(Environment(park_name))
