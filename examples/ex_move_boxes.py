@@ -5,7 +5,7 @@ class DummyAgent(Agent):
         super().__init__(name, beliefs, goals, show_exec=False)
         self.add(Belief("Box",(5,10)))
         
-    @pl(gain,Goal("move_boxes"), Belief("Box",('X','Y')))
+    @pl(gain,Goal("move_boxes"), Belief("Box",(Any, Any)))
     def move_to_pos(self, src, position):
         x, y = position
         my_pos = self.get(Belief("my_pos",('My_X','My_Y')))
