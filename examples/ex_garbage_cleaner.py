@@ -52,7 +52,7 @@ class Robot(Agent):
             self.clean_position(self.position)
             self.add(Goal("decide_move"))
     
-    @pl(gain,Goal("move",("X","Y")))
+    @pl(gain,Goal("move",(Any,Any)))
     def move(self,src,target):
         tgX,tgY = target
         x, y = self.position
