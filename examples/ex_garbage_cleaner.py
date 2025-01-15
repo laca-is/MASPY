@@ -3,12 +3,12 @@ from maspy import *
 class Room(Environment):
     def add_dirt(self, agent, position):
         self.print(f"Dirt created in position {position}")
-        dirt_status = self.get(Percept("dirt","Statuses"))
+        dirt_status = self.get(Percept("dirt", Any))
         dirt_status.args[position] = False # changes the dict inside percept
     
     def clean_position(self, agent, position):
         self.print(f"{agent} is cleaning position {position}")
-        dirt_status = self.get(Percept("dirt","Statuses"))
+        dirt_status = self.get(Percept("dirt", Any))
         if dirt_status.args[position] is False:
             dirt_status.args[position] = True # changes the dict inside percept
 
@@ -26,7 +26,7 @@ class Robot(Agent):
         min_dist = float("inf")
         target = None
  
-        dirt_pos = self.get(Belief("dirt","Pos","Room"))
+        dirt_pos = self.get(Belief("dirt", Any, "Room"))
         print(f"{dirt_pos.args}")
         x, y = self.position
         for pos, clean in dirt_pos.args.items():
