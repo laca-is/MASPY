@@ -4,7 +4,7 @@ class dummy_agent(Agent):
     def __init__(self, name):
         super().__init__(name)
     
-    @pl(gain, Belief("make_action","Name"))
+    @pl(gain, Belief("make_action", Any))
     def action_on_env(self, src, env_name):
         self.action(env_name).env_action(self)
         self.stop_cycle()
