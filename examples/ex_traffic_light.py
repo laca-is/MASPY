@@ -9,7 +9,7 @@ class Crossing(Environment):
         self.print(f"Agent {src} is now crossing")
 
 class Cross_Manager(Agent):
-    @pl(gain, Belief("traffic_light","Color"))
+    @pl(gain, Belief("traffic_light", Any))
     def traffic_light(self,src,color):
         vehicles = self.find_in("Vehicle","Env","Cross_Junction")
         for vehicle in vehicles["Vehicle"]:
