@@ -8,10 +8,10 @@ class DummyAgent(Agent):
     @pl(gain,Goal("move_boxes"), Belief("Box",(Any, Any)))
     def move_to_pos(self, src, position):
         x, y = position
-        my_pos = self.get(Belief("my_pos",('My_X','My_Y')))
+        my_pos = self.get(Belief("my_pos",(Any, Any)))
         self.move(my_pos.args, (x,y))
         self.print(f"Picking up Box in {x,y}")
-        target_pos = self.get(Belief("target_pos",('Tg_X','Tg_Y')))
+        target_pos = self.get(Belief("target_pos",(Any, Any)))
         self.move((x,y), target_pos.args)
         self.print(f"Putting Box in {target_pos.args}")
         self.stop_cycle()
