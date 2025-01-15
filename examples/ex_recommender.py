@@ -351,7 +351,7 @@ class Recomender(Agent):
             random_popular = self.get_popular_movies(agt_name)
             return random_popular
     
-    @pl(gain, Goal("checkFeedback","Feedback"))
+    @pl(gain, Goal("checkFeedback", Any))
     def update_preferences(self, src, feedback_list):
         agent_prefs = self.get(Belief("Preferences","Prefs",src))
         self.print(agent_prefs)
@@ -452,7 +452,7 @@ class Client(Agent):
     def asking_recomendations(self, src):
         self.send("Recomender",achieve,Goal("Recomend"))
     
-    @pl(gain, Goal("checkRecomendations","Recomend_list"), Belief("Preferences","Prefs_List"))
+    @pl(gain, Goal("checkRecomendations", Any), Belief("Preferences", Any))
     def check_recomendations(self, src, recomendations, preferences):
         buffer = "I've been recommended the following movies:\n\t"
         feedback_list = []
