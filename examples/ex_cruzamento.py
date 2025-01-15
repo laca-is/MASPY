@@ -38,7 +38,7 @@ class CT(Agent):
         super().__init__(agt_name)
         self.add(Goal("verificar_cruzamento"))
         
-    @pl(gain, Goal("verificar_cruzamento"), Belief("cruzamento","Status","C1"))    
+    @pl(gain, Goal("verificar_cruzamento"), Belief("cruzamento",Any,"C1"))    
     def verificar_cruzamento(self, src, status):
         if status == "livre":
             self.print("Cruzamento esta livre, informando agente VA para cruzar")
