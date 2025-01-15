@@ -338,7 +338,7 @@ class Recomender(Agent):
         self.send(src,achieve,Goal("checkRecomendations",recomend_list))
     
     def generate_list_for_agent(self, agt_name):
-        saved_preferences = self.get(Belief("Preferences","Prefs",agt_name))
+        saved_preferences = self.get(Belief("Preferences", Any, agt_name))
         if saved_preferences is not None:
             if saved_preferences.args['genres'] == {}:
                 random_popular = self.get_popular_movies(agt_name)
@@ -353,7 +353,7 @@ class Recomender(Agent):
     
     @pl(gain, Goal("checkFeedback", Any))
     def update_preferences(self, src, feedback_list):
-        agent_prefs = self.get(Belief("Preferences","Prefs",src))
+        agent_prefs = self.get(Belief("Preferences", Any, src))
         self.print(agent_prefs)
         if agent_prefs is None:
             prefs_dict = {"directors": {},'genres': {},'actors': {}}
