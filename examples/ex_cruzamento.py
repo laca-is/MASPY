@@ -24,13 +24,13 @@ class VA(Agent):
     @pl(gain, Goal("cruzar"), Belief("no_cruzamento"))
     def realizar_cruzamento(self, src):
         self.print("Realizando o cruzamento")
-        self.action("C1").cruzar(self.my_name)
+        self.cruzar()
         self.stop_cycle()
         
     @pl(gain, Goal("aguardar"), Belief("no_cruzamento"))
     def aguardar(self, src):
         self.print("Aguardando")
-        self.action("C1").aguardar(self.my_name)
+        self.aguardar()
         self.send("CT",achieve,Goal("verificar_cruzamento"))
         
 class CT(Agent):
@@ -38,7 +38,7 @@ class CT(Agent):
         super().__init__(agt_name)
         self.add(Goal("verificar_cruzamento"))
         
-    @pl(gain, Goal("verificar_cruzamento"), Belief("cruzamento",Any,"C1"))    
+    @pl(gain, Goal("verificar_cruzamento"), Belief("cruzamento", Any,"C1"))    
     def verificar_cruzamento(self, src, status):
         if status == "livre":
             self.print("Cruzamento esta livre, informando agente VA para cruzar")

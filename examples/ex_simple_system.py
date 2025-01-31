@@ -22,6 +22,6 @@ if __name__ == "__main__":
     env = SimpleEnv()
     Change = Channel("SimpleChannel")
     Admin().connect_to([agent1,agent2],[env,Change])
-    agent1.add(Goal("say_hello",(agent2.my_name,)))
+    agent1.add(Goal("say_hello",(agent2.tuple_name,)))
     Admin().start_system()
     

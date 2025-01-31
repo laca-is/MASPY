@@ -7,15 +7,16 @@ end_flag = 0
 class Parking(Environment):
     def __init__(self, env_name,nr_spots=10):
         super().__init__(env_name)
-        self.create(Percept("sold_spots",0,adds_event=False))
+        self.create(Percept("sold_spots",0,"Spots",False))
         self.print(f"Starting parking with {nr_spots} spots")
         for n in range(1,nr_spots+1):
-            self.create(Percept("spot",(n,"free"),adds_event=False))
+            self.create(Percept("spot",(n,"free"),"Spots",False))
     
     def park_spot(self, agt, spot_id):
         spot = self.get(Percept("spot",(spot_id,"free")))
         if spot:
             self.change(spot,(spot_id,[agt]))
+            return True
         else:
             self.print(f"Requested spot({spot_id}) unavailable")
             return None
@@ -37,12 +38,12 @@ class Manager(Agent):
         self.add(Goal("broadcast_price"))
         self.end_counter = 0
     
-    @pl(gain,Goal("broadcast_price"),Belief("spotPrice", Any))
+    @pl(gain,Goal("broadcast_price"), Belief("spotPrice",Any))
     def send_price(self,src,spot_price):
         self.print(f"Broadcasting spot price[{spot_price}] to all Agents in Parking Channel.")
         self.send(broadcast,achieve,Goal("checkPrice",spot_price),"Parking")
     
-    @pl(gain,Goal("offer_answer",(Any, Any)),Belief("minPrice", Any))
+    @pl(gain,Goal("offer_answer",(Any,Any)), Belief("minPrice",Any))
     def offer_response(self,src,offer_answer,min_price):
         answer, price = offer_answer
         match answer:
@@ -62,22 +63,16 @@ class Manager(Agent):
                     self.print(f"Offered price from {src} accepted[{price}]. Choosing spot.")
                     self.add(Goal("SendSpot",src),True)
     
-    @pl(gain,Goal("SendSpot", Any), Belief("spot",(Any,"free"),"Parking"))        
+    @pl(gain,Goal("SendSpot",Any), Belief("spot",(Any,Any),"Parking"))        
     def send_spot(self, src, agent, spot):
-        #self.perceive("Parking")
-        #free_spots = self.get(Belief("spot",("Id","free"),"Parking"),all=True)
-        #if free_spots:
-        #    random_spot = rnd.choice(free_spots)
-        #    spot_id = random_spot.args[0]
         spot_id = spot[0]
         self.print(f"Sending spot({spot_id}) to {agent}")
         self.send(agent,achieve,Goal("park",("Parking",spot_id)),"Parking")
     
-    @pl(gain,Goal("SendSpot", Any))
+    @pl(gain,Goal("SendSpot",Any))
     def unavailable_spot(self, src, agent):
         self.print(f"No spots available for {agent}")
         self.send(agent,tell,Belief("no_spots_available"),"Parking")
-    
     
     
 class Driver(Agent):
@@ -86,9 +81,10 @@ class Driver(Agent):
         self.counter = counter
         self.wait_time = wait
         self.last_price = 0
+        self.filter_perceptions(add,ignore,"Spots")
         self.add(Belief("budget",budget,adds_event=False))
     
-    @pl(gain,Goal("checkPrice", Any),Belief("budget",( Any, Any)))
+    @pl(gain,Goal("checkPrice",Any),Belief("budget",(Any,Any)))
     def check_price(self,src,given_price,budget):
         max_price, want_price = budget
         self.add(Belief("offer_made",given_price,adds_event=False))
@@ -113,8 +109,6 @@ class Driver(Agent):
             self.add(Belief("offer_answer",answer,adds_event=False))
             self.send(src,achieve,Goal("offer_answer",answer),"Parking")
             self.last_price = given_price
-        #if answer[0] == "reject": 
-        #    self.end_reasoning()
     
     @pl(gain,Belief("no_spots_available"))
     def no_spots(self,src):
@@ -122,20 +116,20 @@ class Driver(Agent):
         self.end_reasoning()
         
     
-    @pl(gain,Goal("park",(Any, Any)))
+    @pl(gain,Goal("park",(Any,Any)))
     def park_on_spot(self,src,spot):
         park_name, spot_id = spot
-        self.connect_to(Environment(park_name))
+        self.connect_to(park_name)
         self.print(f"Parking on spot({spot_id})")
-        confirm = self.action(park_name).park_spot(self.str_name,spot_id)
+        confirm = self.park_spot(spot_id)
         if confirm is None:
             self.print(f"Spot is unavailable after given by {src}")
             self.end_reasoning()
             return None
         sleep(self.wait_time)
         self.print(f"Leaving spot({spot_id})")
-        self.action(park_name).leave_spot(self.str_name)
-        self.disconnect_from(Environment(park_name))
+        self.leave_spot()
+        self.disconnect_from(park_name)
         self.end_reasoning()
         
     def end_reasoning(self):
@@ -143,26 +137,26 @@ class Driver(Agent):
         global end_flag
         with self.lock:
             end_flag += 1
-        print(f"{self.str_name} Ended reasoning ({end_flag})")
+        print(f"{self.my_name} Ended reasoning ({end_flag})")
         if Admin().running_class_agents("Drv") is False:
             Admin().stop_all_agents()
         
 if __name__ == "__main__":
-    park = Parking('Parking',100)
+    park = Parking('Parking',5)
     park_ch = Channel("Parking")
     manager = Manager()
-    
+
     drv_settings: dict = {"budget": [(10,12),(10,14),(10,20),(12,14),(12,16)],
                     "counter": [0.4, 0.8, 1, 1.2, 1.4],
                     "wait": [0, 0.5, 0.7, 1, 1.5]}
-    driver_list: list[Agent] = []
-    for i in range(1000):
+    driver_list = []
+    for i in range(10):
         budget = drv_settings["budget"][i%5]
         counter = drv_settings["counter"][(i*2)%5]
         wait = drv_settings["wait"][(i*4)%5]
         driver_list.append(Driver("Drv",budget,counter,wait))
 
-    Admin().block_prints()
+    #Admin().block_prints()
     Admin().connect_to(manager, [park,park_ch])
     Admin().connect_to(driver_list, park_ch)
     Admin().start_system()

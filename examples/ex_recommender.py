@@ -338,7 +338,7 @@ class Recomender(Agent):
         self.send(src,achieve,Goal("checkRecomendations",recomend_list))
     
     def generate_list_for_agent(self, agt_name):
-        saved_preferences = self.get(Belief("Preferences", Any, agt_name))
+        saved_preferences = self.get(Belief("Preferences",Any,agt_name))
         if saved_preferences is not None:
             if saved_preferences.args['genres'] == {}:
                 random_popular = self.get_popular_movies(agt_name)
@@ -351,9 +351,9 @@ class Recomender(Agent):
             random_popular = self.get_popular_movies(agt_name)
             return random_popular
     
-    @pl(gain, Goal("checkFeedback", Any))
+    @pl(gain, Goal("checkFeedback",Any))
     def update_preferences(self, src, feedback_list):
-        agent_prefs = self.get(Belief("Preferences", Any, src))
+        agent_prefs = self.get(Belief("Preferences",Any,src))
         self.print(agent_prefs)
         if agent_prefs is None:
             prefs_dict = {"directors": {},'genres': {},'actors': {}}
@@ -452,7 +452,7 @@ class Client(Agent):
     def asking_recomendations(self, src):
         self.send("Recomender",achieve,Goal("Recomend"))
     
-    @pl(gain, Goal("checkRecomendations", Any), Belief("Preferences", Any))
+    @pl(gain, Goal("checkRecomendations",Any), Belief("Preferences",Any))
     def check_recomendations(self, src, recomendations, preferences):
         buffer = "I've been recommended the following movies:\n\t"
         feedback_list = []
