@@ -60,6 +60,7 @@ if __name__ == "__main__":
     print(f'actions: {model.action_space}  space: {model.observation_space}')
     model.learn(qlearning)
     ag = Sample()
+    ag.auto_action = True
     ag.add_policy(model)
     Admin().start_system()
     
