@@ -10,8 +10,6 @@ if TYPE_CHECKING:
 
 DEFAULT_GROUP = "none"
 
-
-
 @dataclass
 class Percept:
     key: str = field(default_factory=str)
@@ -89,6 +87,11 @@ class Action:
     transition: Optional[Callable]
     func: Callable = lambda _: {} 
     
+    def __post_init__(self):
+        match self.data:
+            case int() | str():
+                object.__setattr__(self, "data", [self.data])
+    
     @property
     def act_type(self):
         if isinstance(self._act_type, str):
@@ -106,9 +109,7 @@ def action(act_type: Group, data: Sequence[Any], transition: Optional[Callable]=
                 
         def __set_name__(self, instance: Environment, name: str):
             assert isinstance(act_type, Group), f"Expected Group, got {type(act_type)}"
-            if act_type == Group.single:
-                assert isinstance(data, str), f"Expected str, got {type(data)}"
-            else:
+            if act_type != Group.listed:
                 assert isinstance(data, Sequence) and not isinstance(data, str), f"Expected Sequence of values (list/tuple), got {type(data)}"
             try:
                 instance._actions += [Action(act_type,data,transition,self.func)]
@@ -174,8 +175,8 @@ class Environment(metaclass=EnvironmentMultiton):
             return 
         f_args = "".join(map(str, args))
         f_kwargs = "".join(f"{key}={value}" for key, value in kwargs.items())
-        with self.lock:
-            return print(f"{self.tcolor}{self._name}> {f_args}{f_kwargs}{bcolors.ENDCOLOR}")
+        #with self.lock:
+        return print(f"{self.tcolor}{self._name}> {f_args}{f_kwargs}{bcolors.ENDCOLOR}")
     
     @property
     def get_info(self):
@@ -267,13 +268,15 @@ class Environment(metaclass=EnvironmentMultiton):
     def _add_state(self, percept: Percept):
         self._state_percepts[percept.key] = percept
         match percept.group:
-            case "listed" | "single":
-                assert isinstance(percept.args, Sequence), f"Expected Sequence of values (list/tuple), got {type(percept.args)}"
+            case "listed":
                 self._states[percept.key] = percept.args 
             case "combination":
-                comb: list = []
-                for i in range(1, len(percept.args) + 1):
-                    comb.extend(combinations(percept.args, i))
+                if percept.args_len == 2 and isinstance(percept.args[0], Sequence) and isinstance(percept.args[1], int):
+                    comb = list(combinations(percept.args[0], percept.args[1]))
+                else:
+                    comb = []
+                    for i in range(1, len(percept.args) + 1):
+                        comb.extend(combinations(percept.args, i))
                 self._states[percept.key] = comb
             case "permutation":
                 perm: list = []
@@ -281,7 +284,16 @@ class Environment(metaclass=EnvironmentMultiton):
                     perm.extend(permutations(percept.args, i))
                 self._states[percept.key] = perm
             case "cartesian":
-                ranges = [range(i) for i in percept.args]
+                ranges: list = []
+                for arg in percept._args:
+                    if isinstance(arg, str):
+                        ranges.append([arg])
+                    elif isinstance(arg, Sequence):
+                        ranges.append(arg)
+                    elif isinstance(arg, int):
+                        ranges.append(range(arg))
+                    else:
+                        self.print(f'{arg}:{type(arg)} is not a valid type')
                 cart = list(product(*ranges))
                 self._states[percept.key] = cart
                         

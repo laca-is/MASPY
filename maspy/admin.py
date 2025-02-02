@@ -32,7 +32,7 @@ class Admin(metaclass=AdminMeta):
         signal.signal(signal.SIGINT, self.stop_all_agents)
         self.end_of_execution = False
         self._name = f"# {type(self).__name__} #"
-        self.print("Starting MASPY Program")
+        self.print("Starting MASPY Program - v0.5.5")
         self.show_exec = False
         self.agt_sh_exec = False
         self.agt_sh_cycle = False

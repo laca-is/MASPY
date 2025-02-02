@@ -9,8 +9,8 @@ from maspy.error import (
     InvalidPlanError,
     RunPlanError,
 )
-from maspy.utils import set_changes, merge_dicts, manual_deepcopy, bcolors
-from typing import List, Optional, Dict, Set, Any, Union, Type, cast
+from maspy.utils import set_changes, merge_dicts, manual_deepcopy, bcolors, Condition
+from typing import List, Optional, Dict, Set, Any, Union, Type, cast, _SpecialForm
 from collections.abc import Iterable, Callable, Sequence
 from functools import wraps
 from time import sleep
@@ -40,7 +40,7 @@ DEFAULT_SOURCE = "self"
 DEFAULT_CHANNEL = "default"
 
 @dataclass(eq=True, frozen=True)
-class Belief:
+class Belief(Condition):
     key: str = field(default_factory=str)
     _args: tuple | Any = field(default_factory=tuple)
     source: str | tuple[str, int] = DEFAULT_SOURCE
@@ -101,51 +101,13 @@ class Belief:
             arg_dict = type(arg).__dict__
             if arg_dict.get("__hash__"):
                 args_hashable.append(arg)
-            elif isinstance(arg, (List, Dict, Set)):
+            elif isinstance(arg, (List, Dict, Set, _SpecialForm)):
                 args_hashable.append(repr(arg))
             else:
-                raise TypeError(f"Unhashable type: {type(arg)}")
+                raise TypeError(f"Unhashable type: {arg}:{type(arg)}")
         args_tuple = tuple(args_hashable)
 
         return hash((self.key, args_tuple, self.source))
-    
-    def __invert__(self):
-        return False,self
-    
-    def __and__(self, other):
-        print(self, "&", other)
-        return 42
-        
-    def __or__(self, other):
-        print(self, "|", other)
-        return 27
-    
-    def __xor__(self, other):    
-        print(self, "^", other)
-        return 4
-    
-    def __lt__(self, other):
-        return self.compare(other, "<")
-        
-    def compare(self, other, comp_t):
-        if not isinstance(other, Sequence):
-            other = [other]
-        for x,y in zip(self._args, other):
-            print(f"comparing {x} with {y}")
-            match comp_t:
-                case "<":
-                    if x < y:
-                        continue
-            break
-        else:
-            return True
-        return False
-    
-    def __ge__(self, other):
-        print(self, ">=", other)
-        return True
-    
-    
     
     def __str__(self) -> str:
         return f'Belief {self.key}({self.args})[{self.source}]'
@@ -154,7 +116,7 @@ class Belief:
         return self.__str__()
 
 @dataclass
-class Goal:
+class Goal(Condition):
     key: str = field(default_factory=str)
     _args: tuple | Any = field(default_factory=tuple)
     source: str | tuple[str, int] = DEFAULT_SOURCE
@@ -242,7 +204,7 @@ class Event:
 @dataclass
 class Plan:
     trigger: Event = field(default_factory=Event)
-    context: List[tuple[bool, Belief | Goal]] = field(default_factory=list)
+    context: List[tuple[bool, Belief | Goal]] | Condition = field(default_factory=list)
     body: Callable = lambda _: {}
     conditions: tuple[Callable[..., Any], ...] = (lambda _: {},)
     ev_ctrl: threading.Event = threading.Event()
@@ -280,7 +242,7 @@ MSG = Belief | Ask | Goal | Plan | List[Belief | Ask | Goal | Plan]
 _type_env_set = {Environment, "environment", "envrmnt", "env"}
 _type_ch_set = {Channel, "channel", "chnnl", "ch", "c"}
 
-def pl(change: Event_Change, data: Belief | Goal, context: Belief | Goal | List[Belief | Goal] = [], *condition: Callable):
+def pl(change: Event_Change, data: Belief | Goal, context: Belief | Goal | List[Belief | Goal] | Condition = []):
     class decorator:
         def __init__(self,func):
             self.func = func
@@ -288,27 +250,31 @@ def pl(change: Event_Change, data: Belief | Goal, context: Belief | Goal | List[
         def __set_name__(self, instance: Agent, name: str):
             if not isinstance(change, Event_Change) or not isinstance(data, Belief | Goal):
                 raise TypeError
+
+            context_condition: List[tuple[bool, Belief | Goal]] | Condition
             
-            list_context: List[tuple[bool, Belief | Goal]]
-            
-            if isinstance(context, Belief | Goal):
-                list_context = [(True,context)]
-            
-            if isinstance(context, Iterable):
-                list_context = []
-                for ctxt in context:
-                    if isinstance(ctxt, Belief | Goal):
-                        list_context.append((True,ctxt))
-                    elif isinstance(ctxt, tuple) and len(ctxt) == 2 and isinstance(ctxt[0], bool) and isinstance(ctxt[1], Belief | Goal):
-                        list_context.append(ctxt)
-                    elif ctxt is False:
-                        list_context.append(context)
-                        break
-                    else:
-                        raise Exception(f'Invalid type {type(ctxt)}:{ctxt} - was expecting Belief or Goal')
+            match context:
+                case Condition() if not isinstance(context, Belief | Goal):
+                    context_condition = context
+                
+                case Belief() | Goal():
+                    context_condition = [(True,context)]
+                
+                case Iterable():
+                    context_condition = []
+                    for ctxt in context:
+                        if isinstance(ctxt, Belief | Goal):
+                            context_condition.append((True,ctxt))
+                        elif isinstance(ctxt, tuple) and len(ctxt) == 2 and isinstance(ctxt[0], bool) and isinstance(ctxt[1], Belief | Goal):
+                            context_condition.append(ctxt)
+                        elif ctxt is False:
+                            context_condition.append(context)
+                            break
+                        else:
+                            raise Exception(f'Invalid type {type(ctxt)}:{ctxt} - was expecting Belief or Goal')
             
             event = Event(change,data)
-            plan = Plan(event,list_context,self.func,condition)
+            plan = Plan(event,context_condition,self.func)
             try:
                 instance._plans += [plan]
             except AttributeError:
@@ -370,6 +336,7 @@ class Agent:
         self._dicts: Dict[str, Union[Dict[str, Environment], Dict[str, Channel]]] = {"environment":self._environments, "channel":self._channels}
         
         self._strategies: list[EnvModel] = []
+        self.auto_action: bool = False
 
         self.max_intentions: int = nax_intentions
         self.last_intention: tuple[Plan, Event, tuple] = (Plan(), Event(), tuple())
@@ -417,8 +384,8 @@ class Agent:
             return
         f_args = "".join(map(str, args))
         f_kwargs = "".join(f"{key}={value}" for key, value in kwargs.items())
-        with self.lock:
-            return print(f"{self.tcolor}Agent:{self.my_name}> {f_args}{f_kwargs}{bcolors.ENDCOLOR}")
+        #with self.lock:
+        return print(f"{self.tcolor}Agent:{self.my_name}> {f_args}{f_kwargs}{bcolors.ENDCOLOR}")
         
     @property
     def print_beliefs(self):
@@ -691,7 +658,7 @@ class Agent:
             caller_frame = current_frame.f_back
             assert caller_frame is not None
             caller_function_name = caller_frame.f_code.co_name
-            if caller_function_name in {'_retrieve_plans','recieve_msg','_retrieve_context','_select_plan','has'}:
+            if caller_function_name in {'_retrieve_plans','recieve_msg','_retrieve_context','_select_plan','has','_check', '_format_check'}:
                 return None
             if data_type == search_with:
                 self.print(f'Does not contain {type(data_type).__qualname__} like {data_type}. Searched during {caller_function_name}()')
@@ -830,7 +797,7 @@ class Agent:
                 with self.lock:
                     assert isinstance(msg, Belief | Goal)
                     msg = Ask(msg, self.my_name)
-                
+
                 self._channels[channel]._send(self.my_name,target,msg_act,msg)
                 self.last_sent.append((self.my_name,target,msg_act.name,msg))
                 msg.reply_event.clear()
@@ -920,7 +887,7 @@ class Agent:
                 assert isinstance(msg, Ask), f'Act askOneReply must request an Ask not {type(msg).__qualname__}'
                 found_data = self.get(msg.data_type,ck_src=False)
                 if isinstance(found_data, Belief):
-                    msg.reply_content = found_data
+                    msg.reply_content = found_data.update(source=self.my_name)
                 else:
                     msg.reply_content = None
                 msg.reply_event.set()
@@ -937,7 +904,11 @@ class Agent:
                 assert isinstance(msg, Ask), f'Act askAllReply must request an Ask not {type(msg).__qualname__}'
                 found_data = self.get(msg.data_type,all=True,ck_src=False)
                 if isinstance(found_data, list):
-                    msg.reply_content = cast(List[Belief|Goal], found_data)
+                    content: List[Belief|Goal] = []
+                    for data in found_data:
+                        if isinstance(data, Belief | Goal):
+                            content.append(data.update(source=self.my_name))
+                    msg.reply_content = content
                 else:
                     msg.reply_content = None
                 msg.reply_event.set()
@@ -1060,7 +1031,7 @@ class Agent:
             elif len(self.__running_intentions) >= 1:
                 decision = "Running Intention"
                 description = self._format_data(decision,*self.__running_intentions[0])
-            elif self._strategies:
+            elif self._strategies and self.auto_action:
                 for strat in self._strategies:
                     state = strat.get_state()
                     if state in strat.terminated_states:
@@ -1069,7 +1040,7 @@ class Agent:
                     env = self._environments[strat.name]
                     str_action = strat.actions_list[int_action]
                     action = strat.actions_dict[str_action]
-                    if action.act_type == 'single':
+                    if len(action.data) == 1:
                         action.func(env, self.my_name)
                     else:
                         action.func(env, self.my_name, str_action)
@@ -1093,6 +1064,32 @@ class Agent:
             if self.delay: 
                 sleep(self.delay)
             self.cycle_counter += 1
+    
+    def best_action(self, env_name: str) -> None:
+        assert isinstance(env_name, str), f"best_action must receive string envrironment name not {type(env_name).__qualname__}"
+        
+        for strat in self._strategies:
+            if strat.name != env_name:
+                continue
+            
+            state = strat.get_state()
+            if state in strat.terminated_states:
+                continue
+            int_action = strat.get_action(state)
+            env = self._environments[strat.name]
+            str_action = strat.actions_list[int_action]
+            action = strat.actions_dict[str_action]
+            if len(action.data) == 1:
+                action.func(env, self.my_name)
+            else:
+                action.func(env, self.my_name, str_action)
+            decision = "Execute Strategy"
+            description = f'state: {state} action:{str_action}'
+            self.print(f"Executing Stretegy: action:{str_action} in state: {state}") if self.show_cycle else ...
+            self.save_cycle_log(decision, description)
+            break
+        else:
+            self.print(f"No policy for Environment: {env_name}")
     
     def _perception(self) -> None:
         percept_dict: Dict[str, dict] = dict()
@@ -1257,11 +1254,11 @@ class Agent:
                 else:
                     args = ev_args+ctxt
                     
-                #print(f'{plan.trigger} {plan.executable(*args)}')
+                #self.print(f'{plan.trigger} {args} {plan.executable(*args)}')
                 
-                if plan.executable(*args):
-                    self.__intentions.append((plan,event,args))
-                    break
+                #if plan.executable(*args):
+                self.__intentions.append((plan,event,args))
+                #    break
         try:
             plan, trigger, args = self.__intentions.pop(0)
             return plan, trigger, args
@@ -1271,6 +1268,12 @@ class Agent:
     
     def _retrieve_context(self, plan: Plan) -> tuple | None:
         args: tuple = tuple()
+        
+        if isinstance(plan.context, Condition):
+            c_args = self._check(plan.context)
+            #print(f'Args: {c_args}')
+            return c_args
+        
         for context in plan.context:
             ctxt = self.get(context[1],ck_src=False) 
             if ctxt is None:
@@ -1288,6 +1291,90 @@ class Agent:
         else:
             return args
         return None
+    
+    def _format_check(self, value, args):
+        #print(f'Formating Value: {value}:{type(value)}')
+        if isinstance(value, Condition) and not isinstance(value, Belief|Goal): 
+            f_value = self._check(value, args)
+            if f_value is None:
+                return None, None, None
+            v_args = True
+        else: 
+            f_value = value
+            v_args = False
+        
+        v_bool = False
+        if isinstance(f_value, Belief|Goal):
+            v_data = self.get(f_value, ck_src=False)
+            if v_data is not None:
+                v_bool = True
+                v_data = v_data._args
+            else:
+                v_data = (None,)
+            for v in f_value._args:
+                if v is Any:
+                    v_args = True
+        elif isinstance(f_value, bool):
+            v_data = f_value
+            v_bool = f_value
+        elif isinstance(f_value, Sequence) and not isinstance(f_value, str):
+            v_data = f_value
+            v_bool = True
+        else:
+            v_data = (f_value,)
+            v_bool = True
+        
+        return v_data, v_bool, v_args
+    
+    def _check(self, condition: Condition, args: tuple = tuple()) -> tuple | None:
+        #print(f'Checking Condition: {condition} - {type(condition.left_value)}')
+        cnd_type = condition.c_type
+        
+        if cnd_type == "~":
+            if isinstance(condition.left_value, Belief | Goal) and self.get(condition.left_value, ck_src=False) is None:
+                return args
+            elif isinstance(condition.left_value, Condition) and not isinstance(condition.left_value, Belief | Goal) and self._check(condition.left_value, args) is None:
+                return args
+            else:
+                return None
+        
+        assert condition.right_value is not None and condition.func is not None, f"Unexpected Condition: {condition}"
+        
+        v0_data, v0_bool, v0_args = self._format_check(condition.left_value, args)
+        v1_data, v1_bool, v1_args = self._format_check(condition.right_value, args)
+        #print(f'Checking: {v0_data} {v0_bool} {v1_data} {v1_bool}')
+        if v0_data is None or v1_data is None:
+            return None
+        if not v0_bool and not v1_bool:
+            return args
+        
+        ret_bool = False    
+        match cnd_type:
+            case "op":
+                ret_bool = condition.func(v0_bool, v1_bool)
+            case "comp":
+                for v0, v1 in zip(v0_data,v1_data):
+                    if v0 is None or v1 is None:
+                        break
+                    if not condition.func(v0, v1):
+                        break
+                else:
+                    ret_bool = True
+            case _:
+                self.print(f"Unexpected condition: {cnd_type}")
+        
+        #print(f'Checking: {v0_data}({v0_args}) {v1_data}({v1_args}) {args} {ret_bool}')  
+        if not ret_bool:
+            return None
+        
+        f_args: tuple = tuple()
+        if v0_args:
+            f_args += v0_data
+        if v1_args:
+            f_args += v1_data
+        f_args += args
+        #self.print(f'Returning {f_args}')
+        return f_args
     
     def _force_close_thread(self, thread: threading.Thread):
         thread_id = thread.ident

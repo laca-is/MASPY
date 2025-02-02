@@ -11,7 +11,7 @@
 # )
 
 from maspy.learning.modelling import (
-    EnvModel,qlearning, sarsa, sequence, combination, permutation, cartesian, listed, single
+    EnvModel,qlearning, sarsa, sequence, combination, permutation, cartesian, listed
 )
 
 # register(
@@ -50,6 +50,5 @@ __all__ = [
     "combination",
     "permutation",
     "cartesian",
-    "listed",
-    "single"
+    "listed"
 ]

@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Sequence
 from collections import defaultdict
 from maspy.learning.core import Model
 from maspy.learning.space import Discrete
@@ -15,14 +15,13 @@ Learn_Method = Enum('qlearning | sarsa', ['qlearning', 'sarsa']) # type: ignore[
 qlearning = Learn_Method.qlearning
 sarsa = Learn_Method.sarsa
 
-Group = Enum('sequence | combination | permutation | cartesian | listed | single', ['sequence', 'combination', 'permutation', 'cartesian', 'listed' , 'single']) # type: ignore[misc]
+Group = Enum('sequence | combination | permutation | cartesian | listed | product', ['sequence', 'combination', 'permutation', 'cartesian', 'listed' , 'product']) # type: ignore[misc]
 
 sequence = Group.sequence
 combination = Group.combination
 permutation = Group.permutation
 cartesian = Group.cartesian
 listed = Group.listed
-single = Group.single
 
 class EnvModel(Model):
     def __init__(self, env: 'Environment') -> None:
@@ -35,16 +34,50 @@ class EnvModel(Model):
         self.actions_list: list[str] = []
         self.actions_dict: dict[str, Action] = {}
         for action in actions:
-            if isinstance(action.data,str):
-                self.actions_list.append(action.data)
-                self.actions_dict[action.data] = action
-                continue
-            for arg in action.data:
-                self.actions_list.append(arg)
-                self.actions_dict[arg] = action
+            if action.act_type == 'listed':
+                if isinstance(action.data,str):
+                    self.actions_list.append(action.data)
+                    self.actions_dict[action.data] = action
+                    continue
+                for args in action.data:
+                    self.actions_list.append(args)
+                    self.actions_dict[args] = action
+                                
+            elif action.act_type == 'combination':
+                act_comb: list = []
+                for i in range(1, len(action.data) + 1):
+                    act_comb.extend(combinations(action.data, i))
+                for args in act_comb:
+                    self.actions_list.append(args)
+                    self.actions_dict[args] = action
+                    
+            elif action.act_type == "permutation":
+                act_perm: list = []
+                for i in range(1, len(action.data) + 1):
+                    act_perm.extend(permutations(action.data, i))
+                for args in act_perm:
+                    self.actions_list.append(args)
+                    self.actions_dict[args] = action
+                
+            elif action.act_type == "cartesian":
+                ranges: list = []
+                for args in action.data:
+                    if isinstance(args, str):
+                        ranges.append([args])
+                    elif isinstance(args, Sequence):
+                        ranges.append(args)
+                    elif isinstance(args, int):
+                        ranges.append(range(args))
+                act_cart = list(product(*ranges))
+                for args in act_cart:
+                    self.actions_list.append(args)
+                    self.actions_dict[args] = action
+            else:
+                print(f"Unsupported action type: {action.act_type}")
+        #print(self.actions_list)
         state: dict = {}
         keys = states.keys()
-        value_lists = states.values()
+        value_lists = list(states.values())
         self.states_list = list(product(*value_lists))
         self.terminated_states: list[tuple] = []
         
@@ -52,57 +85,37 @@ class EnvModel(Model):
         for percept in env._state_percepts.values():
             if percept.key not in env.possible_starts:
                 start_list.append(env._states[percept.key])
+                env.possible_starts[percept.key] = env._states[percept.key]
         normalized = [ 
-            [item] if not isinstance(item, (list, tuple, set, str)) 
+            [item] if not isinstance(item, list | tuple | set) 
             else list(item) for item in start_list
         ]
         self.initial_state_distrib = list(product(*normalized))
-            
-        print(self.actions_list)
+        
         self.num_actions = len(self.actions_list)
         self.P = {
             state: {action: [] for action in range(self.num_actions)}
             for state in self.states_list
         }
         
-        for stt in self.states_list:
-            for action in actions:
+        for stt in self.states_list:                
+            for act in self.actions_list:
+                action = self.actions_dict[act]
                 if action.transition is not None:
                     func = action.transition
                 else:
                     func = action.func
-                if action.act_type == 'listed':
-                    for args in action.data:
-                        for key, val in zip(keys, stt):
-                            state[key] = val
-                        if len(action.data) == 1:
-                            results = func(env,state)
-                        else:
-                            results = func(env,state,args)
-                        assert isinstance(results, tuple), "transition returns must be at least state e reward"
-                        self.add_transition(stt, results, args)
-                        
-                elif action.act_type == 'single':
-                    for key, val in zip(keys, stt):
-                        state[key] = val
-                    results = func(env,state)
-                    assert isinstance(results, tuple)
-                    self.add_transition(stt, results, action.data)
                     
-                elif action.act_type == 'combination':
-                    act_comb: list = []
-                    for i in range(1, len(action.data) + 1):
-                        act_comb.extend(combinations(action.data, i))
-                    for act in act_comb:
-                        for key, val in zip(keys, stt):
-                            state[key] = val
-                        results = func(env,state,act)
-                        assert isinstance(results, tuple)
-                        self.add_transition(stt, results, act)
+                for key, val in zip(keys, stt):
+                    state[key] = val
+                if len(action.data) == 1:
+                    results = func(env,state)
                 else:
-                    print(f"Unsupported action type: {action.act_type}")
+                    results = func(env,state,act)
+                assert isinstance(results, tuple), "transition returns must be at least state e reward"
+                self.add_transition(stt, results, act)
         
-        self.curr_state = self.initial_state_distrib[np.random.randint(0, len(self.initial_state_distrib))]           
+        self.curr_state = self.initial_state_distrib[np.random.randint(0, len(self.initial_state_distrib))]       
         self.action_space = Discrete(len(self.actions_list))
         self.observation_space = Discrete(len(self.states_list))
         
@@ -118,6 +131,7 @@ class EnvModel(Model):
             self.env.change(percept, stt)
             
     def add_transition(self, state, results: tuple, action: Any):
+        #print(state, " - ",action, " - ",results)
         action_idx = self.actions_list.index(action)
         new_state: tuple = tuple(results[0].values())
         reward: float | int = results[1]
@@ -132,7 +146,7 @@ class EnvModel(Model):
                 
         self.P[state][action_idx].append((probability, new_state, reward, terminated))
         
-    def learn(self, learn_method: Learn_Method, learning_rate: float = 0.05, discount_factor: float = 0.8, epsilon: float = 1, final_epsilon: float = 0.1, num_steps: int = 50, num_episodes: int = 10000):
+    def learn(self, learn_method: Learn_Method, learning_rate: float = 0.05, discount_factor: float = 0.8, epsilon: float = 1, final_epsilon: float = 0.1, max_steps: int | None = None, num_episodes: int = 10000):
         self.learning_rate = learning_rate
         self.learning_rate_policy = 0.01
         self.discount_factor = discount_factor
@@ -146,15 +160,19 @@ class EnvModel(Model):
         self.q_table: dict = defaultdict(lambda: np.zeros(self.num_actions))
         self.value_table: dict = defaultdict(lambda: 0.0)
         self.policy_table: dict = defaultdict(lambda: np.full(self.num_actions, 1 / self.num_actions))
-        
+        #for i, p in self.P.items():
+        #    for a, x in p.items():
+        #        print(i, self.actions_list[a], x) if x[0][-1] == True else ...
         for _ in range(num_episodes):
             self.reset()
+            #print(f"Episode {_}")
             done = False
             step = 0
-            while not done:
+            while not done and not (max_steps and step >= max_steps):
                 action = self.get_action()
                 old_state = self.curr_state
                 next_state, reward, terminated, truncated, info = self.step(action)
+                #print(f'{old_state} {self.actions_list[action]} {next_state} {reward}')
                 match learn_method.name:
                     case "qlearning":
                         self.q_learning_update(old_state, next_state, action, reward, terminated)

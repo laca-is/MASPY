@@ -1,6 +1,9 @@
-from typing import Any
-from random import choice
+from __future__ import annotations
+from typing import Any, Callable, Optional, TYPE_CHECKING
 from threading import Lock
+
+if TYPE_CHECKING:
+    from maspy.agent import Belief, Goal
 
 class bcolorsMeta(type):
     _instances: dict[str, Any] = {}
@@ -61,6 +64,46 @@ class bcolors(bcolorsMeta):
         color = cls.Colors_Dict[t_name][1][num]
         cls.Colors_Dict[t_name] = (num + 1, cls.Colors_Dict[t_name][1])
         return color
+
+class Condition:
+    def __init__(self, c_type: str, left_value: Condition | Belief | Goal, right_value: Condition | Belief | Goal | None = None, func: Optional[Callable] = None) -> None:
+        self.c_type = c_type
+        self.func = func
+        self.left_value = left_value
+        self.right_value = right_value
+    
+    def __invert__(self):
+        return Condition("~", self)
+    
+    def __and__(self, other):
+        return Condition("op", self, other, lambda x,y: x & y)
+        
+    def __or__(self, other):
+        return Condition("op", self, other, lambda x,y: x | y)
+    
+    def __xor__(self, other):    
+        return Condition("op", self, other, lambda x,y: x ^ y)
+    
+    def __lt__(self, other):
+        return Condition("comp", self,other, lambda x,y: x < y)
+    
+    def __le__(self, other):
+        return Condition("comp", self,other, lambda x,y: x <= y)
+    
+    def __gt__(self, other):
+        return Condition("comp", self,other, lambda x,y: x > y)
+    
+    def __ge__(self, other):
+        return Condition("comp", self,other, lambda x,y: x >= y)
+    
+    def __ne__(self, value):
+        return Condition("comp", self,value, lambda x,y: x != y)
+    
+    def __str__(self) -> str:
+        return f'{self.c_type}[{self.left_value}, {self.right_value}]'
+    
+    def __repr__(self):
+        return self.__str__()
 
 def merge_dicts(dict1: dict[Any, dict[Any, set[Any]]] | None, dict2: dict[Any, dict[Any, set[Any]]] | None) -> dict | None:
     if dict1 is None or dict2 is None:

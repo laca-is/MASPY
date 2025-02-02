@@ -70,12 +70,11 @@ class Channel(metaclass=CommsMultiton):
             return
         f_args = "".join(map(str, args))
         f_kwargs = "".join(f"{key}={value}" for key, value in kwargs.items())
-        with self.lock:
-            return print(f"{self.tcolor}{self._name}> {f_args}{f_kwargs}{bcolors.ENDCOLOR}")
+        #with self.lock:
+        return print(f"{self.tcolor}{self._name}> {f_args}{f_kwargs}{bcolors.ENDCOLOR}")
     
     @property
     def get_info(self):
-        
         return {"connected_agents": list(self._agents.keys()).copy()}
     
     def add_agents(self, agents: Union[List['Agent'],'Agent']):
