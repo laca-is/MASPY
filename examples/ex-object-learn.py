@@ -13,9 +13,9 @@ class SortingBox(Environment):
         obj, box = obj_to_box
         obj_state: str = state[obj]
         if obj_state == "Shelf":
+            state[obj] = box
             if obj.split("_")[-1] == box.split("_")[-1]:
                 reward = 5
-                state[obj] = box
             else:
                 reward = -5
         else:
