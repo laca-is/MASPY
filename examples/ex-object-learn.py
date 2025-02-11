@@ -46,8 +46,8 @@ class BoxAgent(Agent):
         model = model_list[0]
         print(f'actions: {model.actions_list}  space: {model.states_list}')
         model.learn(qlearning, num_episodes=100)
-        ag.auto_action = True
-        ag.add_policy(model)
+        self.auto_action = True
+        self.add_policy(model)
     
 if __name__ == "__main__":
     env = SortingBox()
