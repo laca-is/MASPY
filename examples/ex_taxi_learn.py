@@ -99,7 +99,7 @@ class Taxi(Environment):
         self.change(percept, position)
         self.print_percepts
 
-    @action(single, "pickup", pickup_transition)
+    @action(listed, "pickup", pickup_transition)
     def pickup(self, agt):
         pass_loc = self.get(Percept("Passenger_loc",Any))
         taxi_loc = self.get(Percept("taxi_location", (Any,Any)))
@@ -112,7 +112,7 @@ class Taxi(Environment):
             self.print(f"No passanger at {taxi_loc.args} position")
         self.print_percepts
 
-    @action(single, "dropoff", drop_off_transition)
+    @action(listed, "dropoff", drop_off_transition)
     def drop_off(self, agt):
         pass_loc = self.get(Percept("Passenger_loc",Any))
         taxi_loc = self.get(Percept("taxi_location", (Any,Any)))
@@ -131,6 +131,7 @@ class Sample(Agent):
     @pl(gain,Goal("aquire_learning",(Any)))
     def aquire_learning(self,src, model):
         self.add_policy(model[0])
+        self.auto_action = True
 
 if __name__ == "__main__":
     env = Taxi("Grid")
