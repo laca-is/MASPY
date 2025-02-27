@@ -31,7 +31,7 @@ To update your already installed version of MASPY to the latest one, you can use
 
 	pip install maspy-ml -U
 
-MASPY needs `Python` 3.12+ to run correctly.
+**MASPY needs `Python` 3.12+ to run correctly.**
 
 ## Latest changes
 	maspy-v0.2.3:
