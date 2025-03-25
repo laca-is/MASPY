@@ -33,6 +33,8 @@ To update your already installed version of MASPY to the latest one, you can use
 
 **MASPY needs `Python` 3.12+ to run correctly.**
 
+[![PyPI Downloads](https://static.pepy.tech/badge/maspy-ml)](https://pepy.tech/projects/maspy-ml)
+
 ## Latest changes
 	maspy-v0.2.3:
 	- Properly addition of Intention Mechanisms
