@@ -1,8 +1,11 @@
 from maspy import *
 import random as rnd
 from time import sleep
+from threading import Lock
 
+global_lock = Lock()
 end_flag = 0
+success = 0
 
 class Parking(Environment):
     def __init__(self, env_name,nr_spots=10):
@@ -14,6 +17,7 @@ class Parking(Environment):
     
     def park_spot(self, agt, spot_id):
         spot = self.get(Percept("spot",(spot_id,"free")))
+        self.print(f"Driver {agt} parking on spot({spot_id})")
         if spot:
             self.change(spot,(spot_id,[agt]))
             return True
@@ -28,7 +32,6 @@ class Parking(Environment):
             self.change(spot,(spot.args[0],"free"))
         else:
             self.print(f"Driver {agt} not found in any spot")
-            pass
 
 class Manager(Agent):
     def __init__(self, agt_name=None):
@@ -36,6 +39,7 @@ class Manager(Agent):
         self.add(Belief("spotPrice",15,adds_event=False))
         self.add(Belief("minPrice",10,adds_event=False))
         self.add(Goal("broadcast_price"))
+        self.print("Manager initialized")
         self.end_counter = 0
     
     @pl(gain,Goal("broadcast_price"), Belief("spotPrice",Any))
@@ -46,32 +50,33 @@ class Manager(Agent):
     @pl(gain,Goal("offer_answer",(Any,Any)), Belief("minPrice",Any))
     def offer_response(self,src,offer_answer,min_price):
         answer, price = offer_answer
+        self.print(f"{self.cycle_counter} Received answer[{answer}] from {src}")
         match answer:
             case "reject":
-                self.print(f"Given price[{price}] rejected by {src}")
+                self.print(f"{self.cycle_counter} Given price[{price}] rejected by {src}")
                 pass
             case "accept":
-                self.print(f"Price accepted[{price}] by {src}. Choosing spot.")
+                self.print(f"{self.cycle_counter} Price accepted[{price}] by {src}. Choosing spot.")
                 self.add(Goal("SendSpot",src),True)
             case "offer":
                 if price < min_price:
-                    counter_offer = (min_price+price)/1.2
+                    counter_offer = (min_price+price)/1.8
                     counter_offer = round(counter_offer,2)
-                    self.print(f"Price offered[{price}] from {src} too low. Counter-offer[{counter_offer}]")
+                    self.print(f"{self.cycle_counter} Price offered[{price}] from {src} too low. Counter-offer[{counter_offer}]")
                     self.send(src,achieve,Goal("checkPrice",counter_offer),"Parking")
                 else:
-                    self.print(f"Offered price from {src} accepted[{price}]. Choosing spot.")
+                    self.print(f"{self.cycle_counter} Offered price from {src} accepted[{price}]. Choosing spot.")
                     self.add(Goal("SendSpot",src),True)
     
-    @pl(gain,Goal("SendSpot",Any), Belief("spot",(Any,Any),"Parking"))        
+    @pl(gain,Goal("SendSpot",Any), Belief("spot",(Any,"free"),"Parking"))        
     def send_spot(self, src, agent, spot):
         spot_id = spot[0]
-        self.print(f"Sending spot({spot_id}) to {agent}")
+        self.print(f"{self.cycle_counter} Sending spot({spot_id}) to {agent}")
         self.send(agent,achieve,Goal("park",("Parking",spot_id)),"Parking")
     
     @pl(gain,Goal("SendSpot",Any))
     def unavailable_spot(self, src, agent):
-        self.print(f"No spots available for {agent}")
+        self.print(f"{self.cycle_counter} No spots available for {agent}")
         self.send(agent,tell,Belief("no_spots_available"),"Parking")
     
     
@@ -81,12 +86,12 @@ class Driver(Agent):
         self.counter = counter
         self.wait_time = wait
         self.last_price = 0
-        self.filter_perceptions(add,ignore,"Spots")
         self.add(Belief("budget",budget,adds_event=False))
     
     @pl(gain,Goal("checkPrice",Any),Belief("budget",(Any,Any)))
     def check_price(self,src,given_price,budget):
-        max_price, want_price = budget
+        self.wait(rnd.random()*2)
+        want_price, max_price  = budget
         self.add(Belief("offer_made",given_price,adds_event=False))
         if self.last_price == given_price:
             self.print(f"Rejecting price[{given_price}]. Same as last offer")
@@ -130,33 +135,46 @@ class Driver(Agent):
         self.print(f"Leaving spot({spot_id})")
         self.leave_spot()
         self.disconnect_from(park_name)
+        global success 
+        with self.lock:
+            success += 1
         self.end_reasoning()
         
     def end_reasoning(self):
         self.stop_cycle()
         global end_flag
-        with self.lock:
-            end_flag += 1
-        print(f"{self.my_name} Ended reasoning ({end_flag})")
-        if Admin().running_class_agents("Drv") is False:
-            Admin().stop_all_agents()
-        
-if __name__ == "__main__":
+        global global_lock
+        with global_lock:
+            if Admin().sys_running:
+                end_flag += 1
+                if end_flag % 10 == 0:
+                    print(f"{self.my_name} Ended reasoning ({end_flag})")
+                if Admin().running_class_agents("Drv") is False:
+                    Admin().stop_all_agents()
+
+def main(num_agents: int = 10):
+    global success 
+    success = 0
     park = Parking('Parking',5)
     park_ch = Channel("Parking")
     manager = Manager()
 
-    drv_settings: dict = {"budget": [(10,12),(10,14),(10,20),(12,14),(12,16)],
+    drv_settings: dict = {"budget": [(10,12),(8,14),(10,20),(12,14),(12,16)],
                     "counter": [0.4, 0.8, 1, 1.2, 1.4],
                     "wait": [0, 0.5, 0.7, 1, 1.5]}
-    driver_list = []
-    for i in range(10):
+    driver_list: list = []
+    for i in range(num_agents):
         budget = drv_settings["budget"][i%5]
         counter = drv_settings["counter"][(i*2)%5]
         wait = drv_settings["wait"][(i*4)%5]
-        driver_list.append(Driver("Drv",budget,counter,wait))
-
-    #Admin().block_prints()
+        drv = Driver("Drv",budget,counter,wait)
+        driver_list.append(drv)
+        
+    manager.read_all_mail = False
     Admin().connect_to(manager, [park,park_ch])
     Admin().connect_to(driver_list, park_ch)
     Admin().start_system()
+
+        
+if __name__ == "__main__":
+    main(10)
