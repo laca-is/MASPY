@@ -52,22 +52,7 @@ To update your already installed version of MASPY to the latest one, you can use
 	- Fixed perception speed
 	- Fixed ending multiple agents problem
 	- Better agent finder
-
-## About MASPY
-
-The MASPY Framework is made of four main classes. 
-The Agent Class for the managing beliefs, goals and plans. 
-The Environment Class for providing perception and interaction context to agents
-The Communication Class for agents to exchange messages and information
-The Admin Class for configuration and control of the system 
-
-![MASPY CLASSES](/docs/diags/maspy-CLASSES.png)
-
-
-Each Agent follows the BDI reasoning and each cycle occors as presented in the following diagram:
-
-![MASPY REASONING](/docs/diags/maspy-REASONING_learn.png)
-
+ 
 ## Using MASPY
 
 ### Import
