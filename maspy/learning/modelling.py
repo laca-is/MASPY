@@ -8,14 +8,14 @@ from itertools import product, combinations, permutations
 import numpy as np
 
 if TYPE_CHECKING:
-    from maspy.environment import Environment
+    from maspy.environment import Environment, Action
 
 Learn_Method = Enum('qlearning | sarsa', ['qlearning', 'sarsa']) # type: ignore[misc]
 
 qlearning = Learn_Method.qlearning
 sarsa = Learn_Method.sarsa
 
-Group = Enum('sequence | combination | permutation | cartesian | listed | product', ['sequence', 'combination', 'permutation', 'cartesian', 'listed' , 'product']) # type: ignore[misc]
+Group = Enum('sequence | combination | permutation | cartesian | listed', ['sequence', 'combination', 'permutation', 'cartesian', 'listed']) # type: ignore[misc]
 
 sequence = Group.sequence
 combination = Group.combination
@@ -33,6 +33,48 @@ class EnvModel(Model):
         from maspy.environment import Action
         self.actions_list: list[str] = []
         self.actions_dict: dict[str, Action] = {}
+        self.orginize_actions(actions)
+        self.off_policy = False
+        
+        #print(self.actions_list)
+        state: dict = {}
+        keys = states.keys()
+        value_lists = list(states.values())
+        self.states_list = list(product(*value_lists))
+        self.terminated_states: list[tuple] = []
+        
+        self.num_actions = len(self.actions_list)
+        self.P = {
+            state: {action: [] for action in range(self.num_actions)}
+            for state in self.states_list
+        }
+        
+        if isinstance(env.possible_starts,str):
+            if env.possible_starts == "off-policy":
+                self.initial_state_distrib = self.states_list.copy() 
+                self.initial_states = states
+                self.off_policy = True
+            else:
+                raise TypeError(f'Error: possible_starts must be a {dict} when not "off-policy", got {env.possible_starts} instead')
+        else:
+            self.make_policy_table(env, states)
+        
+        self.curr_state = self.initial_state_distrib[np.random.randint(0, len(self.initial_state_distrib))]       
+        self.action_space = Discrete(len(self.actions_list))
+        self.observation_space = Discrete(len(self.states_list))
+        
+        from maspy.admin import Admin
+        Admin()._add_model(self)
+        
+    
+    def reset_percepts(self):
+        self.reset()
+        from maspy.environment import Percept
+        for stt, (name, _) in zip(self.curr_state, self.initial_states.items()):
+            percept = self.env.get(Percept(name),ck_args=False)
+            self.env.change(percept, stt)
+    
+    def orginize_actions(self, actions: list['Action']):
         for action in actions:
             if action.act_type == 'listed':
                 if isinstance(action.data,str):
@@ -74,13 +116,11 @@ class EnvModel(Model):
                     self.actions_dict[args] = action
             else:
                 print(f"Unsupported action type: {action.act_type}")
-        #print(self.actions_list)
+    
+    def make_policy_table(self, env: 'Environment', states: dict[str, Sequence]):
         state: dict = {}
         keys = states.keys()
-        value_lists = list(states.values())
-        self.states_list = list(product(*value_lists))
-        self.terminated_states: list[tuple] = []
-        
+        assert isinstance(env.possible_starts, dict), "possible_starts must be a dict when not off-policy"
         start_list = list(env.possible_starts.values())
         for percept in env._state_percepts.values():
             if percept.key not in env.possible_starts:
@@ -90,14 +130,9 @@ class EnvModel(Model):
             [item] if not isinstance(item, list | tuple | set) 
             else list(item) for item in start_list
         ]
+        self.initial_states = env.possible_starts.copy()
         self.initial_state_distrib = list(product(*normalized))
-        
-        self.num_actions = len(self.actions_list)
-        self.P = {
-            state: {action: [] for action in range(self.num_actions)}
-            for state in self.states_list
-        }
-        
+
         for stt in self.states_list:                
             for act in self.actions_list:
                 action = self.actions_dict[act]
@@ -113,23 +148,8 @@ class EnvModel(Model):
                 else:
                     results = func(env,state,act)
                 assert isinstance(results, tuple), "transition returns must be at least state e reward"
-                self.add_transition(stt, results, act)
-        
-        self.curr_state = self.initial_state_distrib[np.random.randint(0, len(self.initial_state_distrib))]       
-        self.action_space = Discrete(len(self.actions_list))
-        self.observation_space = Discrete(len(self.states_list))
-        
-        from maspy.admin import Admin
-        Admin()._add_model(self)
-        
-    
-    def reset_percepts(self):
-        self.reset()
-        from maspy.environment import Percept
-        for stt, (name, values) in zip(self.curr_state, self.env.possible_starts.items()):
-            percept = self.env.get(Percept(name),ck_args=False)
-            self.env.change(percept, stt)
-            
+                self.add_transition(stt, results, act)    
+                
     def add_transition(self, state, results: tuple, action: Any):
         #print(state, " - ",action, " - ",results)
         action_idx = self.actions_list.index(action)
@@ -147,6 +167,7 @@ class EnvModel(Model):
         self.P[state][action_idx].append((probability, new_state, reward, terminated))
         
     def learn(self, learn_method: Learn_Method, learning_rate: float = 0.05, discount_factor: float = 0.8, epsilon: float = 1, final_epsilon: float = 0.1, max_steps: int | None = None, num_episodes: int = 10000):
+        
         self.learning_rate = learning_rate
         self.learning_rate_policy = 0.01
         self.discount_factor = discount_factor
@@ -160,6 +181,8 @@ class EnvModel(Model):
         self.q_table: dict = defaultdict(lambda: np.zeros(self.num_actions))
         self.value_table: dict = defaultdict(lambda: 0.0)
         self.policy_table: dict = defaultdict(lambda: np.full(self.num_actions, 1 / self.num_actions))
+        
+        self.reset_percepts()
         #for i, p in self.P.items():
         #    for a, x in p.items():
         #        print(i, self.actions_list[a], x) if x[0][-1] == True else ...
@@ -171,7 +194,21 @@ class EnvModel(Model):
             while not done and not (max_steps and step >= max_steps):
                 action = self.get_action()
                 old_state = self.curr_state
-                next_state, reward, terminated, truncated, info = self.step(action)
+                if self.off_policy:
+                    action_str = self.actions_list[action]
+                    results = self.actions_dict[action_str].transition(self.env, *self.curr_state, action_str)
+                    next_state = self.curr_state = (results[0],)
+                    reward = results[1]
+                    probability = 1.0
+                    terminated = False
+                    
+                    for result in results[2:]:
+                        if isinstance(result, float):
+                            probability = result
+                        elif isinstance(result, bool):
+                            terminated = result
+                else:
+                    next_state, reward, terminated, truncated, info = self.step(action)
                 #print(f'{old_state} {self.actions_list[action]} {next_state} {reward}')
                 match learn_method.name:
                     case "qlearning":
@@ -199,7 +236,7 @@ class EnvModel(Model):
         self.q_table[state][action] += self.learning_rate * temp_diff
         
         self.training_error.append(temp_diff)
-        
+    
     def sarsa_update(self, state, next_state, action: int, reward, terminated):
         next_action = self.get_action(next_state)
         
@@ -257,7 +294,7 @@ class EnvModel(Model):
     def get_state(self):
         from maspy.environment import Percept
         state = ()
-        for name in self.env.possible_starts.keys():
+        for name in self.initial_states.keys():
             percept = self.env.get(Percept(name),ck_args=False)
             state += (percept.args,)
         return state

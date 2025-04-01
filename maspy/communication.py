@@ -1,6 +1,7 @@
 from threading import Lock
 from typing import Dict, Set, List, TYPE_CHECKING, Union, Any, Optional
 from maspy.utils import bcolors
+from logging import getLogger
 from enum import Enum
 
 if TYPE_CHECKING:
@@ -54,6 +55,7 @@ class Channel(metaclass=CommsMultiton):
         self.my_name = comm_name
         self.sys_time = Admin().sys_time
         Admin()._add_channel(self)
+        self.logger = getLogger("maspy")
         
         from maspy.agent import Belief, Goal, Ask, Plan
         self.data_types = {Belief,Goal,Ask,Plan}
@@ -77,6 +79,14 @@ class Channel(metaclass=CommsMultiton):
     def get_info(self):
         return {"connected_agents": list(self._agents.keys()).copy()}
     
+    @property
+    def ch_info(self):
+        return {
+            "class_name": "Channel",
+            "my_name": self.my_name,
+            "connected_agents": list(self._agents.keys())
+        }
+    
     def add_agents(self, agents: Union[List['Agent'],'Agent']):
         if isinstance(agents, list):
             for agent in agents:
@@ -97,9 +107,9 @@ class Channel(metaclass=CommsMultiton):
         else:
             self.agent_list[type(agent).__name__] = {agent.tuple_name[0] : {ag_name}}
             self._agents[ag_name] = agent
-        
-        self.print(f'Connecting agent {type(agent).__name__}:{agent.tuple_name}') if self.show_exec else ...
-       
+            
+        # self.logger.info(f'Connecting agent {type(agent).__name__}:{agent.tuple_name}', extra=self.ch_info)
+
     def _rm_agents(self, agents: Union[List['Agent'],'Agent']):
         if isinstance(agents, list):
             for agent in agents:
@@ -113,9 +123,8 @@ class Channel(metaclass=CommsMultiton):
         if agent.tuple_name in self._agents:
             del self._agents[ag_name]
             self.agent_list[type(agent).__name__][agent.tuple_name[0]].remove(ag_name)
-        self.print(
-            f"Desconnecting agent {type(agent).__name__}:{agent.tuple_name}"
-        ) if self.show_exec else ...
+        
+        # self.logger.info(f'Desconnecting agent {type(agent).__name__}:{agent.tuple_name}', extra=self.ch_info)
 
     def _send(self, sender: str, target: str | List[str] | broadcast, act: Act, message: Union['Belief', 'Goal', 'Ask', 'Plan'] | List[Union['Belief', 'Ask', 'Goal', 'Plan']]):  
         messages = []
@@ -132,7 +141,7 @@ class Channel(metaclass=CommsMultiton):
                         self._sending(sender,trgt,act,msg)
                 elif is_broadcast(target):
                     for agent_name in self._agents.keys():
-                        if agent_name != sender:
+                        if agent_name != sender and agent_name.split("_")[0] != sender:
                             self._sending(sender,agent_name,act,msg)
                 elif isinstance(target, str):
                     self._sending(sender,target,act,msg)
@@ -161,7 +170,7 @@ class Channel(metaclass=CommsMultiton):
                 
     
     def _sending(self, sender: str, target: str, act: Act, msg: Union['Belief', 'Goal', 'Ask', 'Plan']):
-        self.print(f"{sender} sending {act.name}:{msg} to {target}") if self.show_exec else ...        
+        self.logger.info(f'{sender} sending {act.name}:{msg} to {target}', extra=self.ch_info)   
 
         from maspy.agent import Belief, Goal, Ask, Plan
         try:
@@ -175,7 +184,7 @@ class Channel(metaclass=CommsMultiton):
                 assert isinstance(msg, Plan),f'Act {act.name} must send Plan, sent {msg}'
             self._agents[target].save_msg(act,msg)
         except KeyError:
-            self.print(f"Agent {target} not connected")
+            self.logger.warning(f'Agent {target} not connected', extra=self.ch_info)
         except AssertionError:
             raise
     

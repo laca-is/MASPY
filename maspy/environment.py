@@ -1,8 +1,9 @@
-from threading import Lock
+from threading import Lock, Event
 from typing import Dict, Set, List, TYPE_CHECKING, Union, Optional, Any, Sequence, Callable
 from dataclasses import dataclass, field
 from collections.abc import Iterable
 from maspy.utils import manual_deepcopy, merge_dicts, bcolors
+from logging import getLogger
 from maspy.learning.modelling import Group
 from itertools import product, combinations, permutations
 if TYPE_CHECKING:
@@ -84,7 +85,7 @@ class State:
 class Action:
     _act_type: Group
     data: Sequence[Any]
-    transition: Optional[Callable]
+    transition: Callable
     func: Callable = lambda _: {} 
     
     def __post_init__(self):
@@ -102,7 +103,7 @@ class Action:
             print(f"GROUP TYPE ERROR {type(self._act_type)}:{self._act_type}")
             return ""
 
-def action(act_type: Group, data: Sequence[Any], transition: Optional[Callable]=None) -> Callable:
+def action(act_type: Group, data: Sequence[Any], transition: Callable) -> Callable:
     class decorator:
         def __init__(self,func):
             self.func = func
@@ -151,16 +152,16 @@ class Environment(metaclass=EnvironmentMultiton):
         from maspy.admin import Admin
         Admin()._add_environment(self)
         self.sys_time = Admin().sys_time
-        #  Dict[Agt_cls, Dict[Agt_name, Set[Agt_fullname]]]
+        self.logger = getLogger("maspy")
+        self.last_msg = ""
         self.agent_list: Dict[str, Dict[str, Set[str]]] = dict()
-        #  Dict[Agt_fullname, Agt_inst]
         self._agents: Dict[str, 'Agent'] = dict()
         
         self._name = f"Environment:{self.my_name}"
-        #  Dict[env_name, Dict[percept_key, Set[Percept]]]
+        self.perceiving_agents: int = 0
         self._percepts: Dict[str, Dict[str, Set[Percept]]] = dict()
         
-        self.possible_starts: dict = dict()
+        self.possible_starts: dict | str = dict()
         self._actions: List[Action]
         self._states: Dict[str, Sequence] = dict()
         self._state_percepts: Dict[str, Percept] = dict()
@@ -190,7 +191,12 @@ class Environment(metaclass=EnvironmentMultiton):
         return {"percepts": percept_list, "connected_agents": list(self._agents.keys()).copy()}
     
     def perception(self) -> Dict[str, Dict[str, Set[Percept]]]:
-        return manual_deepcopy(self._percepts)
+        with self.lock:
+            self.perceiving_agents += 1
+        percepts = manual_deepcopy(self._percepts)
+        with self.lock:
+            self.perceiving_agents -= 1
+        return percepts
 
     @property
     def print_percepts(self):
@@ -207,7 +213,16 @@ class Environment(metaclass=EnvironmentMultiton):
         for action in self._actions:
             actions += f"{action}\n"
         print(f"{actions}\r")
-        
+    
+    @property
+    def env_info(self):
+        return {
+            "class_name": "Environment",
+            "my_name": self.my_name,
+            "percepts": [percept for percept in [percept_set for percept_set in self._percepts.values()]],
+            "connected_agents": list(self._agents.keys())
+        }
+    
     def add_agents(self, agents: Union[List['Agent'],'Agent']):
         if isinstance(agents, list):
             for agent in agents:
@@ -227,7 +242,7 @@ class Environment(metaclass=EnvironmentMultiton):
             self.agent_list[type(agent).__name__] = {agent.tuple_name[0] : {ag_name}}
             
         self._agents[ag_name] = agent
-        self.print(f'Connecting agent {type(agent).__name__}:{agent.tuple_name}') if self.show_exec else ...
+        # self.logger.info(f'Connecting Agent {type(agent).__name__}:{agent.my_name}', extra=self.env_info)
     
     def _rm_agents(
         self, agents: Union[Iterable['Agent'], 'Agent']
@@ -246,17 +261,16 @@ class Environment(metaclass=EnvironmentMultiton):
             assert isinstance(agent.tuple_name, tuple)
             del self._agents[ag_name]
             self.agent_list[type(agent).__name__][agent.tuple_name[0]].remove(ag_name)
-        self.print(
-            f"Disconnecting agent {type(agent).__name__}:{agent.tuple_name}"
-        ) if self.show_exec else ...
+        # self.logger.info(f'Disconnecting Agent {type(agent).__name__}:{agent.my_name}', extra=self.env_info)
     
     def create(self, percept: List[Percept] | Percept):
+        percept_dict = self._clean(percept)
         with self.lock:
-            percept_dict = self._clean(percept)
             aux_percepts = manual_deepcopy(self._percepts)
-            merge_dicts(percept_dict, aux_percepts)
+        merge_dicts(percept_dict, aux_percepts)
+        with self.lock:
             self._percepts = aux_percepts
-            self.print(f"Creating {percept}") if self.show_exec else ...
+        # self.logger.info(f'Creating {percept}', extra=self.env_info)
         
         if isinstance(percept, list):
             for prcpt in percept:
@@ -293,14 +307,14 @@ class Environment(metaclass=EnvironmentMultiton):
                     elif isinstance(arg, int):
                         ranges.append(range(arg))
                     else:
-                        self.print(f'{arg}:{type(arg)} is not a valid type')
+                        self.logger.warning(f'{arg}:{type(arg)} is not a valid type',extra=self.env_info)
                 cart = list(product(*ranges))
                 self._states[percept.key] = cart
                         
 
     def get(self, percept:Percept, all=False, ck_group=False, ck_args=True) -> List[Percept] | Percept | None:
         found_data = []
-        self.print(f"Looking for percept like: {percept}") if self.show_exec else ...
+        ## self.logger.debug(f'Getting percept like: {percept}', extra=self.env_info)
         for group_keys in self._percepts.values():
             for percept_set in group_keys.values():
                 for prcpt in percept_set:
@@ -359,7 +373,7 @@ class Environment(metaclass=EnvironmentMultiton):
             else:
                 self._percepts[percept.group][percept.key].remove(percept)
         except KeyError:
-            self.print(f'{percept} couldnt be deleted')
+            self.logger.warning(f'{percept} doesnt exist, cannot be deleted',extra=self.env_info)
               
     def _clean(self, percept_data: Iterable[Percept] | Percept) -> Dict[str, Dict[str, set]]:
         match percept_data:

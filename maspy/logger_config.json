@@ -1,0 +1,58 @@
+{
+    "version": 1,
+    "disable_existing_loggers": false,
+    "formatters": {
+        "simple": {
+            "format": "[%(levelname)s] %(class_name)s:%(my_name)s> %(message)s"
+        },
+        "simple_json": {
+            "()": "maspy.logger.MyJSONFormatter",
+            "fmt_keys":{
+                "level": "levelname",
+                "message": "message",
+                "function": "funcName"
+            }
+        },
+        "json": {
+            "()": "maspy.logger.MyJSONFormatter",
+            "fmt_keys":{
+                "level": "levelname",
+                "message": "message",
+                "timestamp": "timestamp",
+                "logger": "name",
+                "function": "funcName",
+                "line": "lineno",
+                "thread_name": "threadName"
+            }
+        }
+    },
+    "handlers": {
+        "stderr": {
+            "class": "logging.StreamHandler",
+            "level": "WARNING",
+            "formatter": "simple",
+            "stream": "ext://sys.stderr"
+        },
+        "file_json": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "level": "DEBUG",
+            "formatter": "simple_json",
+            "filename": "logs/maspy.log.jsonl"
+        },
+        "queue_handler": {
+            "class": "logging.handlers.QueueHandler",
+            "handlers": [
+                "stderr", "file_json"
+            ],
+            "respect_handler_level": true
+        }
+    },
+    "loggers": {
+        "maspy": {
+            "level": "DEBUG",
+            "handlers": [
+                "queue_handler"
+            ]
+        }
+    }
+}

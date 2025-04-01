@@ -1,4 +1,4 @@
-from threading import Lock, Thread
+from threading import Lock, Thread, Event
 from typing import Any, Dict, List, Union, Optional, TypeVar
 from collections.abc import Iterable
 from maspy.environment import Environment
@@ -8,31 +8,68 @@ from maspy.utils import bcolors
 from maspy.learning.modelling import EnvModel
 import pprint
 import signal
+import json
+import logging.config
+import logging.handlers
 import pandas as pd # type: ignore
 from time import sleep, time
+from pathlib import Path
+import atexit
 import os
 import sys
+
+MASPY_VERSION = "0.6.0"
 
 TAgent = TypeVar('TAgent', bound=Agent)
 TEnv = TypeVar('TEnv', bound=Environment)
 TChannel = TypeVar('TChannel', bound=Channel)
 
+def setup_logging():
+    config_file = Path("maspy/logger_config.json")
+    with open(config_file) as f:
+        config = json.load(f)
+        
+    if not os.path.exists("logs"):
+        os.makedirs("logs")
+        
+    main_name = os.path.basename(sys.argv[0]).split(".py")[0]
+    counter = 1
+    filename = f"{main_name}_{counter}"
+    while os.path.exists(f"logs/{filename}.log.jsonl"):
+        counter += 1
+        filename = f"{main_name}_{counter}"
+    config["handlers"]["file_json"]["filename"] = f"logs/{filename}.log.jsonl"
+            
+    logging.config.dictConfig(config)
+    queue_handler = logging.getHandlerByName("queue_handler")
+    if queue_handler is not None:
+        assert(isinstance(queue_handler, logging.handlers.QueueHandler))
+        queue_handler.listener.start()
+        atexit.register(queue_handler.listener.stop)
+
 class AdminMeta(type):
     _instances: Dict[str, Any] = {}
     _lock: Lock = Lock()
-
     def __call__(cls, *args, **kwargs):
         with cls._lock:
             if cls not in cls._instances:
                 instance = super().__call__(*args, **kwargs)
                 cls._instances[cls] = instance
         return cls._instances[cls]
-class Admin(metaclass=AdminMeta):
+    
+    def reset_instance(cls, *args, **kwargs):
+        cls._instances = super().__call__(*args, **kwargs)
+        return cls._instances[cls]
+    
+class Admin(metaclass=AdminMeta):    
     def __init__(self:'Admin') -> None:
+        self.logger = logging.getLogger("maspy")
+        #setup_logging()
         signal.signal(signal.SIGINT, self.stop_all_agents)
         self.end_of_execution = False
         self._name = f"# {type(self).__name__} #"
-        self.print("Starting MASPY Program - v0.5.5")
+        self.print(f"Starting MASPY Program - {MASPY_VERSION}")
+        self.logger.info(f"Starting MASPY Program - {MASPY_VERSION}", extra={"class_name": "Admin"})
         self.show_exec = False
         self.agt_sh_exec = False
         self.agt_sh_cycle = False
@@ -49,6 +86,9 @@ class Admin(metaclass=AdminMeta):
         self._environments: Dict[str, Environment] = dict()
         self._models: Dict[str, EnvModel] = dict()
         
+        self.start_event: Event = Event()
+        
+        self.report_buffer = ""
         self.full_report = False
         self.report = False
         self._report_lock = False
@@ -56,7 +96,15 @@ class Admin(metaclass=AdminMeta):
         self.record_rate = 5
         self.start_time: float|None = None
         self.system_info: Dict[str, Any] = dict()
-        
+    
+
+    def reset_instance(self, *args, **kwargs):
+        for env in self._environments.values():
+            type(env)._instances.pop(env.my_name)
+        for ch in self._channels.values():
+            type(ch)._instances.pop(ch.my_name)
+        type(self)._instances = {}
+    
     def print(self,*args, **kwargs):
         f_args = "".join(map(str, args))
         f_kwargs = "".join(f"{key}={value}" for key, value in kwargs.items())
@@ -189,7 +237,7 @@ class Admin(metaclass=AdminMeta):
             model.reset_percepts()
                 
         self.start_time = time()
-        
+        self.sys_running = True
         if self.recording:
             self.record_info()
             
@@ -201,7 +249,8 @@ class Admin(metaclass=AdminMeta):
             
             if no_agents:
                 self.print("No agents are connected")
-            
+            self.start_event.set()
+            self.print("Starting System")
             sleep(1)
             while self.running_agents():
                 if self.recording:
@@ -210,6 +259,8 @@ class Admin(metaclass=AdminMeta):
                 sleep(1)
             
             self.stop_all_agents()
+            self.sys_running = False
+            return
         except Exception as e:
             self.print(e)
             pass
@@ -260,11 +311,12 @@ class Admin(metaclass=AdminMeta):
 
             agent = self._agents[agent_name]
             self._started_agents.append(agent)
-            agent.reasoning()
+            agent.reasoning(self.start_event)
         except KeyError:
             self.print(f"'Agent' {agent_name} not connected to environment")
             
     def stop_all_agents(self,sig=None,frame=None):
+        self.logger.info("Ending MASPY Program", extra={"class_name": "Admin"})
         if self._report_lock:
             return
         self.elapsed_time = time() - self.start_time
@@ -281,21 +333,23 @@ class Admin(metaclass=AdminMeta):
         if (self.full_report or self.report) and not self._report_lock:
             self._report_lock = True
             self.print("Making System Report...")
-            self._print_report()
+            return self._print_report()
             self.print("System Report Completed")
-        os._exit(0)
+        #sleep(2)
+        #os._exit(0) 
     
     def _print_report(self) -> None:
-        # buffer = "\n# System Report #\n"
-        # #print(f'Confirmation (spots_sold): {self._environments["Parking"].print_percepts}')
-        # buffer += f'Elapsed Time: {round(self.elapsed_time,4)} seconds\n'
-        # buffer += f'Total Agents: {len(self._agents)}\n'
-        # for name, counter in self._num_agent.items():
-        #     buffer += f'  {name}: {counter}\n'
-        # buffer += f'Total Msgs: {self._channels["Parking"].send_counter}\n'
-        # for sender, counter in self._channels["Parking"].send_counter_agent.items():
-        #     buffer += f'  By {sender}\'s: {counter} msgs\n'
-        # print(buffer)
+        buffer = "\n# System Report #\n"
+        #print(f'Confirmation (spots_sold): {self._environments["Parking"].print_percepts}')
+        buffer += f'Elapsed Time: {round(self.elapsed_time,4)} seconds\n'
+        buffer += f'Total Agents: {len(self._agents)}\n'
+        for name, counter in self._num_agent.items():
+            buffer += f'  {name}: {counter}\n'
+        buffer += f'Total Msgs: {self._channels["Parking"].send_counter}\n'
+        for sender, counter in self._channels["Parking"].send_counter_agent.items():
+            buffer += f'  By {sender}\'s: {counter} msgs\n'
+        self.report_buffer = buffer
+        return
         log_dict: Dict[float, Dict[str, Dict[str, Any]]] = dict() 
         for instance in self._agents.values():
             for key, value in instance.cycle_log.items():

@@ -1,5 +1,6 @@
 import threading
 import ctypes
+from logging import getLogger
 from dataclasses import dataclass, field
 from maspy.environment import Environment, Percept	
 from maspy.communication import Channel, Act
@@ -15,10 +16,11 @@ from collections.abc import Iterable, Callable, Sequence
 from functools import wraps
 from time import sleep
 from enum import Enum
-import importlib as implib
+from importlib import import_module
+from traceback import extract_tb
 import inspect
-import traceback
 import sys
+from random import uniform
 
 Event_Change = Enum('gain | lose | test', ['gain', 'lose', 'test']) # type: ignore[misc]
 
@@ -319,13 +321,18 @@ class Agent:
         self.my_name = name
         Admin().add_agents(self)
         self.sys_time = Admin().sys_time
-        
+        self.logger = getLogger("maspy")
         self.delay: int|float = 0.000001
         self.stop_flag: threading.Event | None = None
         self.running: bool = False
         self.thread: threading.Thread | None = None
-        self.saved_msgs: List = []
+        
         self.lock = threading.Lock()
+        self.connection_lock = threading.Lock()
+        self.perception_lock = threading.Lock()
+        self.intention_lock = threading.Lock()
+        self.print_lock = threading.Lock()
+        self.msg_lock = threading.Lock()
         self.reply_event: Dict[tuple, threading.Event] = {}
         
         self._ml_models: List = []
@@ -344,24 +351,28 @@ class Agent:
         self.__supended_intentions: list[tuple[Plan, Event, tuple, str, Event | None]] = []
         self.__running_intentions: list[tuple[Plan, Event, tuple]] = []
         
-        
         self.__events: List[Event] = []
+        self.curr_event: Event | None = None
         self.last_event: Event | None = None
         self.__beliefs: Dict[str | tuple[str, int], Dict[str, Set[Belief]]] = dict()
         self.__goals: Dict[str | tuple[str, int], Dict[str, Set[Goal]]] = dict()
         self.belief_list: List[Belief] = []
         self.goal_list: List[Goal] = []
         self.last_goal: Goal | None = None
-        self.running_goal: Goal | None = None
         self.percept_filter: Dict[str, set[str]] = {ignore.name: set(), focus.name: set()}
         
+        self.saved_msgs: List = []
         self.last_sent: list[tuple[str, str | List[str], str, MSG]] = []
         self.last_recv: list[tuple[str, MSG]] = []
         self.last_plan: Plan | None = None
+        self.aplc_plans: List[Plan] | None = None
         
-        if beliefs: 
+        self.logging = False
+        if beliefs:
+            self.logger.debug(f"Adding Initial Beliefs: {beliefs}", extra=self.agent_info()) if self.logging else ... 
             self.add(beliefs, False)
         if goals: 
+            self.logger.debug(f"Adding Initial Goals: {goals}", extra=self.agent_info()) if self.logging else ...
             self.add(goals, False)
         
         self._plans: List[Plan]
@@ -384,8 +395,8 @@ class Agent:
             return
         f_args = "".join(map(str, args))
         f_kwargs = "".join(f"{key}={value}" for key, value in kwargs.items())
-        #with self.lock:
-        return print(f"{self.tcolor}Agent:{self.my_name}> {f_args}{f_kwargs}{bcolors.ENDCOLOR}")
+        with self.print_lock:
+            return print(f"{self.tcolor}Agent:{self.my_name}> {f_args}{f_kwargs}{bcolors.ENDCOLOR}")
         
     @property
     def print_beliefs(self):
@@ -423,6 +434,27 @@ class Agent:
             buffer += f"\n\t{plan}"
         self.print(buffer)
     
+    def agent_info(self):
+        return {
+            "class_name": "Agent",
+            "my_name": self.my_name,
+            "cycle": self.cycle_counter,
+            #"curr_event": self.curr_event,
+            #"aplc_plans": self.aplc_plans,
+            #"running_intentions": self.__running_intentions,
+            #"last_recv": self.last_recv,
+            #"last_sent": self.last_sent,
+            #"last_plan": self.last_plan,
+            #"last_event": self.last_event,   
+            #"intentions": self.__intentions,
+            "events": self.__events.copy(),
+            "saved_msgs": self.saved_msgs.copy(),
+            #"beliefs": self.belief_list,
+            #"goals": self.goal_list,
+            #"envs": list(self._environments.keys()), 
+            #"chs": list(self._channels.keys())
+        }
+    
     def filter_perceptions(self, operation: Operation, option: Option, group: str | list[str]):
         assert isinstance(operation,Operation), f"Invalid operation. Choose {Operation}."
         assert isinstance(option,Option), f"Invalid option. Choose {Option}."
@@ -431,14 +463,14 @@ class Agent:
             group = [group]
             
         option_str = option.name
-        print(f'{operation} {option_str} {group} to filter.')
+        #print(f'{operation} {option_str} {group} to filter.')
         for g in group:
             if operation == Operation.add:
                 self.percept_filter[option_str].add(g)
             elif operation == Operation.rm and g in self.percept_filter[option_str]:
                 self.percept_filter[option_str].remove(g)
             else:
-                self.print(f"{g} not in {option_str} filter.")
+                self.logger.warning(f"{g} not in {option_str} filter.", extra=self.agent_info()) if self.logging else ...
     
     def connect_to(self, target: Environment | Channel | str):
         if isinstance(target, str):
@@ -449,8 +481,9 @@ class Agent:
         if isinstance(target, str):
             classes: List[tuple] = []
             try:
-                imported = implib.import_module(target)
+                imported = import_module(target)
             except ModuleNotFoundError:
+                self.logger.error(f"No File named '{target}' found", extra=self.agent_info()) if self.logging else ...
                 self.print(f"No File named '{target}' found")
                 return
             for name, obj in inspect.getmembers(imported):
@@ -463,10 +496,10 @@ class Agent:
                     
         match target:
             case Environment():
-                with self.lock:
+                with self.connection_lock:
                     self._environments[target.my_name] = target
             case Channel():
-                with self.lock:
+                with self.connection_lock:
                     self._channels[target.my_name] = target
             case _:
                 raise Exception(f'Invalid type {type(target)}:{target} - was expecting Channel or Environment')
@@ -482,16 +515,16 @@ class Agent:
                 
         match target:
             case Environment():
-                with self.lock:
+                with self.connection_lock:
                     target._rm_agent(self)
                     del self._environments[target.my_name]
             case Channel():
-                with self.lock:
+                with self.connection_lock:
                     target._rm_agent(self)
                     del self._channels[target.my_name]
                 
     def add_policy(self, policy: EnvModel):
-        self.print(f"Adding model for {policy.name}")
+        self.logger.info(f"Adding model for {policy.name}", extra=self.agent_info()) if self.logging else ...
         self._strategies.append(policy)
         self.connect_to(Environment(policy.name))
     
@@ -563,12 +596,25 @@ class Agent:
                 self.belief_list.remove(data_type)
             else:
                 self.goal_list.remove(data_type)
-        
+    
+    def _check_caller(self):
+        stack = inspect.stack(3)
+        caller_frame = stack[2]
+        caller_method = caller_frame.function
+
+        if caller_method != "__init__" and caller_method in Agent.__dict__:
+            return f"Called internally from {type(self).__name__}:{caller_method}"
+        else:
+            return f"Called externally from {type(self).__name__}:{caller_method}"
+    
     def add(self, data_type: Belief | Goal | Iterable[Belief | Goal], instant: bool = False):
-        self.save_cycle_log("Adding Info", self._format_data("Adding Info", data_type=data_type,instant=instant))
+        #print(f"Add {data_type} | {self._check_caller()}")
+        
         if self.running is False:
             instant = False
-        self.print(f"Adding {data_type}") if self.show_exec else ...
+        self.logger.debug(f"Adding Info: {self._format_data("Adding Info", data_type=data_type,instant=instant)}", extra=self.agent_info()) if self.logging else ...    
+        # self.save_cycle_log("Adding Info", self._format_data("Adding Info", data_type=data_type,instant=instant))
+        
         cleaned_data = self._clean(data_type)
         
         for type_data, data in cleaned_data.items():
@@ -586,10 +632,11 @@ class Agent:
         self._new_event(gain,data_type,instant)
     
     def rm(self, data_type: Belief | Goal | Iterable[Belief | Goal], instant: bool = False):
-        self.save_cycle_log("Removing Info",f'{data_type}:{instant}')  
+        #print(f"Rm {data_type} | {self._check_caller()}")
         if self.running is False:
             instant = False
-        self.print(f"Removing {data_type}") if self.show_exec else ...
+        self.logger.debug(f"Removing Info: {self._format_data("Removing Info", data_type=data_type,instant=instant)}", extra=self.agent_info()) if self.logging else ...
+        # self.save_cycle_log("Removing Info",self._format_data("Removing Info", data_type=data_type,instant=instant))  
         
         if not isinstance(data_type, Iterable): 
             data_type = [data_type]
@@ -600,14 +647,19 @@ class Agent:
             elif isinstance(typ, Goal):
                 self.__goals[typ.source][typ.key].remove(typ)
             else:
+                self.logger.warning(f"Data_Type {typ} is neither Belief or Goal", extra=self.agent_info()) if self.logging else ...
                 self.print(f"Data_Type {typ} is neither Belief or Goal")
                 
             self.update_lists(typ,"rm")
               
         self._new_event(lose,data_type,instant)
 
-    def test(self, data_type: Belief | Goal):
-        self._new_event(test,data_type)
+    def test(self, data_type: Belief | Goal, instant: bool = False):
+        if self.running is False:
+            instant = False
+        self.logger.debug(f"Testing Info: {self._format_data("Testing Info", data_type=data_type,instant=instant)}", extra=self.agent_info()) if self.logging else ...    
+        # self.save_cycle_log("Testing Info",self._format_data("Testing Info", data_type=data_type,instant=instant)) 
+        self._new_event(test,data_type,instant)
     
     def has(self, data_type: Belief | Goal | Plan | Event):
         return self.get(data_type) is not None
@@ -702,18 +754,18 @@ class Agent:
             return
         
         intention_reason = intention + (reason, event)
-        with self.lock:
+        with self.intention_lock:
             self.__running_intentions.remove(intention)
             self.__supended_intentions.append(intention_reason)
         
         intention[0].ev_ctrl.wait(timeout)
         
-        with self.lock:
+        with self.intention_lock:
             self.__supended_intentions.remove(intention_reason)
 
         while len(self.__running_intentions) > self.max_intentions:
             sleep(0.01)
-        with self.lock:
+        with self.intention_lock:
             self.__running_intentions.append(intention)
     
     def drop_all_desires(self):
@@ -790,15 +842,20 @@ class Agent:
             return True
                     
     def send(self, target: str | List[str], msg_act: Act, msg: MSG, channel: str = DEFAULT_CHANNEL) -> None | Belief | Goal | Iterable[Belief | Goal]:   
+        self.last_sent = []
+        #self.print(f"Sending {msg_act.name} to {target} on {channel} [{self._check_caller()}]")
+        
         if type(target) is str and not target.split("_")[-1].isdigit():
             target = f"{target}_1"
         try:
             if msg_act.name in ['askOneReply','askAllReply']:
-                with self.lock:
+                with self.lock: # Dont remember why this lock is needed
                     assert isinstance(msg, Belief | Goal)
                     msg = Ask(msg, self.my_name)
 
                 self._channels[channel]._send(self.my_name,target,msg_act,msg)
+                #send_thread = threading.Thread(target=self._channels[channel]._send,args=(self.my_name,target,msg_act,msg))
+                #send_thread.start()
                 self.last_sent.append((self.my_name,target,msg_act.name,msg))
                 msg.reply_event.clear()
                 was_set = msg.reply_event.wait()
@@ -814,17 +871,21 @@ class Agent:
                     return None
             else:
                 self._channels[channel]._send(self.my_name,target,msg_act,msg)
+                #send_thread = threading.Thread(target=self._channels[channel]._send,args=(self.my_name,target,msg_act,msg))
+                #send_thread.start()
                 self.last_sent.append((self.my_name,target,msg_act.name,msg))
             
             ch = "in the default channel"
             if channel != DEFAULT_CHANNEL:
                 ch = f" in the channel {channel}"
             if type(target) is str: 
-                self.save_cycle_log("Send Message", f' {self.my_name}  to  {target}  -  {msg_act.name} {msg}{ch}')
+                self.logger.debug(f'Send Message: {self.my_name}  to  {target}  -  {msg_act.name} {msg}{ch}', extra=self.agent_info()) if self.logging else ...
+                # self.save_cycle_log("Send Message", f' {self.my_name}  to  {target}  -  {msg_act.name} {msg}{ch}')
             else:
-                self.save_cycle_log("Send Message", f' {self.my_name}  broadcasting  {msg_act.name} {msg}{ch}')
+                self.logger.debug(f'Send Message: {self.my_name}  broadcasting  {msg_act.name} {msg}{ch}', extra=self.agent_info()) if self.logging else ...
+                # self.save_cycle_log("Send Message", f' {self.my_name}  broadcasting  {msg_act.name} {msg}{ch}')
         except KeyError:
-            self.print(f"Not Connected to Selected Channel:{channel}")
+            self.logger.warning(f'Agent:{self.my_name} Not Connected to Selected Channel:{channel}', extra=self.agent_info()) if self.logging else ...
         except AssertionError:
             raise
         return None
@@ -836,28 +897,65 @@ class Agent:
             except AssertionError:
                 raise
         else:
-            self.saved_msgs.append((act,msg))
+            with self.msg_lock:
+                self.saved_msgs.append((act,msg))
 
     def _mail(self, selection_function: Callable | None = None) -> None:
+        self.last_recv = []
         if callable(selection_function):
             selection_function(self.saved_msgs)
-        else:
-            while self.saved_msgs:
-                act,msg = self.saved_msgs.pop(0)
+        else:                
+            with self.msg_lock:
+                if self.read_all_mail:
+                    mail = self.saved_msgs.copy()
+                    self.saved_msgs = []
+                elif len(self.saved_msgs) > 0:
+                    mail = [self.saved_msgs.pop(0)]
+                else:
+                    mail = []
+            
+            flag = False
+            if len(mail) > 1:
+                length = len(mail)
+                #flag = True
+                
+            if flag:
+                print(f"Processing {len(mail)} messages")
+            inc = 0
+            last = 0.0
+            while mail:
+                if self.my_name == "anager":
+                    print(f"{self.tcolor}Agent:{self.my_name}> Processing Message{bcolors.ENDCOLOR}")
+                    
+                if flag and inc // length/10  > last:
+                    last = inc // length/10 
+                    print(f'Already Prossesed {inc} messages')
+                inc += 1
+                act,msg = mail.pop(0)
                 try:
-                    self.last_recv.append((act.name,msg))
+                    self.last_recv.append((act.name,msg))    
+                    if self.my_name == "anager":
+                        print(f"{self.tcolor}Agent:{self.my_name}> Message Appended {msg}{bcolors.ENDCOLOR}")
+                    
+                    #self.logger.debug(f'Receiving Message: {msg}', extra=self.agent_info()) if self.logging else ...
+                    #if self.my_name == "anager":
+                    #    print(f"{self.tcolor}Agent:{self.my_name}> Logging Message{bcolors.ENDCOLOR}")
+                    
                     self.recieve_msg(act,msg)
+                    if self.my_name == "anager":
+                        print(f"{self.tcolor}Agent:{self.my_name}> Message Received{bcolors.ENDCOLOR}")
                 except AssertionError as ae:
                     print(f"\t{repr(ae)}")
                     exc_type, exc_value, exc_traceback = sys.exc_info()
-                    last_frame = traceback.extract_tb(exc_traceback)[-1]
+                    last_frame = extract_tb(exc_traceback)[-1]
         
                     formatted_last_frame = f"File \"{last_frame.filename}\", line {last_frame.lineno}, in {last_frame.name}\n  {last_frame.line}"
                     
                     print("Error originated from:")
                     print(formatted_last_frame)
-                if not self.read_all_mail:
-                    break
+
+            if flag:
+                print(f"Finished processing messages")
 
     def recieve_msg(self, act: Act, msg: MSG) -> None:
         match act.name:
@@ -867,7 +965,11 @@ class Agent:
                 
             case 'achieve':
                 assert isinstance(msg, Goal),f'Act achieve must receive Goal not {type(msg).__qualname__}'
+                if self.my_name == "anager":
+                    print(f"{self.tcolor}Agent:{self.my_name}> Asserted!{bcolors.ENDCOLOR}")
                 self.add(msg, False)
+                if self.my_name == "anager":
+                    print(f"{self.tcolor}Agent:{self.my_name}> Added!{bcolors.ENDCOLOR}")
                 
             case 'untell':
                 assert isinstance(msg, Belief),f'Act untell must receive Belief not {type(msg).__qualname__}'
@@ -989,40 +1091,52 @@ class Agent:
             if hasattr(instance, name):
                 method = getattr(instance, name)
                 def wrapper(*args, **kwargs):
-                    return method(self.my_name, *args, **kwargs)   
+                    return method(self.my_name, *args, **kwargs) 
                 return wrapper
         raise AttributeError(f"{self.my_name} doesnt have the method '{name}' and is not connected to any environment with the method '{name}'.")
     
-    def reasoning(self) -> None:
+    def reasoning(self, start_flag: threading.Event | None = None) -> None:    
         self.running = True
         self.stop_flag = threading.Event()
-        self.thread = threading.Thread(target=self.cycle,args=(self.stop_flag,))
+        self.thread = threading.Thread(target=self.cycle,args=(start_flag,self.stop_flag,))
         self.thread.start()
     
     def stop_cycle(self, log_flag=False) -> None:
-        self.print("Shutting Down...") if log_flag else ...
-        self.save_cycle_log(decision="End of Reasoning")
+        self.logger.debug("Ending Reasoning", extra=self.agent_info()) if self.logging else ...
+        # self.save_cycle_log(decision="End of Reasoning")
         self.running = False
         if self.stop_flag is not None:
             self.stop_flag.set()
         self.paused_agent = True
                  
-    def cycle(self, stop_flag: threading.Event) -> None:
+    def cycle(self, start_flag: threading.Event | None, stop_flag: threading.Event) -> None:
+        if start_flag is not None:
+            start_flag.wait()
+            #sleep(uniform(0.5, 4.5))
+            
+        if self.my_name == "anager":
+            print(f"{self.tcolor}Agent:{self.my_name}> Starting Reasoning{bcolors.ENDCOLOR}")
+            
         self.cycle_counter = 1
+        last_message = ""
         while not stop_flag.is_set():   
-            self.print("#### New cycle ####") if self.show_cycle else ...
+            if self.my_name == "anager":
+                print(f"{self.tcolor}--{bcolors.ENDCOLOR}")
+    
             self._perception()   
+            if self.my_name == "anager":
+                print(f"{self.tcolor}Agent:{self.my_name}> {self.cycle_counter} Perception Done{bcolors.ENDCOLOR}")
             self._mail() 
-            event = self._select_event()
-            self.print(f"Selected event: {event} in {self.__events}") if self.show_cycle else ...
-            plans = self._retrieve_plans(event)
-            self.print(f"Selected plans: {plans} in {self._plans}") if self.show_cycle else ...
+            if self.my_name == "anager":
+                print(f"{self.tcolor}Agent:{self.my_name}> {self.cycle_counter} Mail Done{bcolors.ENDCOLOR}")
             
             if len(self.__running_intentions) < self.max_intentions:
-                chosen_plan, trgr, args = self._select_intention(plans,event)
-                self.print(f"Selected intention to run: {chosen_plan} with {args} arguments") if self.show_cycle else ...
-            else:
-                self.print(f"Running intention: {self.__running_intentions[0][0]} with {self.__running_intentions[0][2]} arguments") if self.show_cycle else ...
+                self.curr_event = self._select_event()
+                self.aplc_plans = self._retrieve_plans(self.curr_event)
+                chosen_plan, trgr, args = self._select_intention(self.aplc_plans,self.curr_event)
+            
+            if self.my_name == "anager":
+                print(f"{self.tcolor}Agent:{self.my_name}> {self.cycle_counter} Intention Done{bcolors.ENDCOLOR}")
             
             description: Any
             if chosen_plan is not None and trgr is not None:
@@ -1046,21 +1160,30 @@ class Agent:
                         action.func(env, self.my_name, str_action)
                     decision = "Execute Strategy"
                     description = f'state: {state} action:{str_action}'
-                    self.print(f"Executing Stretegy: action:{str_action} in state: {state}") if self.show_cycle else ...
                     break
                 else:
                     decision = "No Intention"
-                    description = self._format_data(decision,trgr=event)
+                    description = self._format_data(decision,trgr=self.curr_event)
             else:
                 decision = "No Intention"
-                description = self._format_data(decision,trgr=event)
-                
-            self.save_cycle_log(decision, description, event, plans)
+                description = self._format_data(decision,trgr=self.curr_event)
+            
+            if self.my_name == "anager":
+                print(f"{self.tcolor}Agent:{self.my_name}> {self.cycle_counter} Decision Done{bcolors.ENDCOLOR}")
+            
+            message = f"{decision}: {description}"
+            if last_message != message:
+                self.logger.debug(message, extra=self.agent_info()) if self.logging else ...
+                last_message = message
+            # self.save_cycle_log(decision, description, self.curr_event, self.aplc_plans)
             
             if stop_flag.is_set():
                 break
             self._execute_plan(chosen_plan, trgr, args)
-            self.print("#### End of cycle ####") if self.show_cycle else ...
+            
+            if self.my_name == "anager":
+                print(f"{self.tcolor}Agent:{self.my_name}> {self.cycle_counter} Plan Done{bcolors.ENDCOLOR}")
+            
             if self.delay: 
                 sleep(self.delay)
             self.cycle_counter += 1
@@ -1085,25 +1208,24 @@ class Agent:
                 action.func(env, self.my_name, str_action)
             decision = "Execute Strategy"
             description = f'state: {state} action:{str_action}'
-            self.print(f"Executing Stretegy: action:{str_action} in state: {state}") if self.show_cycle else ...
-            self.save_cycle_log(decision, description)
+            self.logger.debug(f'{decision}: {description}', extra=self.agent_info()) if self.logging else ...
+            # self.save_cycle_log(decision, description)
             break
         else:
-            self.print(f"No policy for Environment: {env_name}")
+            self.logger.warning(f"No policy for Environment: {env_name}", extra=self.agent_info()) if self.logging else ...
     
     def _perception(self) -> None:
         percept_dict: Dict[str, dict] = dict()
-        with self.lock:
-            for env_name in self._environments:
-                self.print(f"Percepting '{env_name}'") if self.show_cycle and not self.show_prct else ...
+        for env_name in self._environments:
+            with self.perception_lock:
                 percepts = self._environments[env_name].perception()
-                percepts = self._apply_filters(percepts,env_name)
-                self.print(f"Percepting {env_name} : {percepts}") if self.show_prct else ...
-                merge_dicts(percepts,percept_dict)
-            if percept_dict == {}:
-                return
-            belief_dict: Dict[str, Dict[str, Set[Belief]]] = self._percepts_to_beliefs(percept_dict)
-            self._revise_beliefs(belief_dict)
+            percepts = self._apply_filters(percepts,env_name)
+            #self.logger.debug(f"Percepting {env_name} : {percepts}", extra=self.agent_info()) if self.logging else ...
+            merge_dicts(percepts,percept_dict)
+        if percept_dict == {}:
+            return
+        belief_dict: Dict[str, Dict[str, Set[Belief]]] = self._percepts_to_beliefs(percept_dict)
+        self._revise_beliefs(belief_dict)
     
     def _apply_filters(self, percepts: Dict[str, Dict[str, Set[Percept]]], env_name: str):
         filtered_percepts: Dict[str, Dict[str, Set[Percept]]] = dict()
@@ -1129,17 +1251,17 @@ class Agent:
                 try:
                     percepts = self._environments[name].perception()
                     percepts = self._apply_filters(percepts,name)
-                    self.print(f"Percepting '{name}'") if not self.show_prct else self.print(f"Percepting '{name}'")
+                    self.logger.info(f"Perceiving {name} : {percepts}", extra=self.agent_info()) if self.logging else ...
                     merge_dicts(percepts,percept_dict)
                 except KeyError:
-                    self.print(f"Not Connected to Environment:{name}")
+                    self.logger.warning(f"Not Connected to Environment:{name}", extra=self.agent_info()) if self.logging else ...
         else:
             try:
                 percept_dict = self._environments[env_name].perception()
                 percept_dict = self._apply_filters(percept_dict,env_name)
-                self.print(f"Percepting '{env_name}' : {percept_dict}") if self.show_prct else ...
+                self.logger.info(f"Perceiving {env_name} : {percept_dict}", extra=self.agent_info()) if self.logging else ...
             except KeyError:
-                self.print(f"Not Connected to Environment:{env_name}")
+                self.logger.warning(f"Not Connected to Environment:{env_name}", extra=self.agent_info()) if self.logging else ...
         
         belief_dict = self._percepts_to_beliefs(percept_dict)
         self._revise_beliefs(belief_dict)
@@ -1157,10 +1279,12 @@ class Agent:
      
     def _revise_beliefs(self, belief_dict: Dict[str, Dict[str, Set[Belief]]]) -> None:
         for source, keys in self.__beliefs.copy().items():
-            if source == DEFAULT_SOURCE: 
-                continue # Does not remove "self"
-            if isinstance(source, tuple): 
-                continue # Does not remove messages
+            #if source == DEFAULT_SOURCE: 
+            #    continue # Does not remove "self"
+            #if isinstance(source, tuple): 
+            #    continue # Does not remove messages
+            if source not in self._environments.keys() or isinstance(source, tuple):
+                continue
             if source in belief_dict:
                 for key, beliefs in keys.copy().items():
                     if key in belief_dict[source]: 
@@ -1169,29 +1293,33 @@ class Agent:
                         self._new_event(gain, gained_beliefs) # Gained new specific belief
                         self._new_event(lose, lost_beliefs) # Lost an old specific belief
                         del belief_dict[source][key]
-                        if self.show_prct and gained_beliefs:
-                            self.print(f"Specific Beliefs gained in revision: {gained_beliefs}")
-                        if self.show_prct and lost_beliefs:
-                            self.print(f"Specific Beliefs lost in revision: {lost_beliefs}") 
+                        if gained_beliefs:
+                            self.logger.debug(f"Beliefs Gained: {source} Specific Beliefs gained in revision: {gained_beliefs}", extra=self.agent_info()) if self.logging else ...
+                            # self.save_cycle_log("Beliefs Gained", f"{source} Specific Beliefs gained in revision: {gained_beliefs}")
+                        if lost_beliefs:
+                            self.logger.debug(f"Beliefs Lost: {source} Specific Beliefs lost in revision: {lost_beliefs}", extra=self.agent_info()) if self.logging else ...
+                            # self.save_cycle_log("Beliefs Lost", f"{source} Specific Beliefs lost in revision: {lost_beliefs}")
                     else:
                         self._new_event(lose, self.__beliefs[source][key]) # Lost whole key belief
-                        self.print(f"Key Beliefs lost in revision: {self.__beliefs[source][key]}") if self.show_prct else ...
+                        self.logger.debug(f"Beliefs Lost: {source} Beliefs lost in revision: {self.__beliefs[source][key]}", extra=self.agent_info()) if self.logging else ...
+                        # self.save_cycle_log("Beliefs Lost", f"{source} Beliefs lost in revision: {self.__beliefs[source][key]}")
                         del self.__beliefs[source][key]
                         
                 if belief_dict[source] == {}:
                     del belief_dict[source]
             else:
                 for beliefs in keys.values():
-                    self.print(f"{source} Beliefs lost in revision: {beliefs}") if self.show_prct and beliefs else ...
+                    self.logger.debug(f"Beliefs Lost: {source} Beliefs lost in revision: {beliefs}", extra=self.agent_info()) if self.logging else ...
+                    # self.save_cycle_log("Beliefs Lost", f"{source} Beliefs lost in revision: {beliefs}")
                     self._new_event(lose, beliefs) # Lost whole source of belief (env)
                 del self.__beliefs[source]
         
         for source,keys in belief_dict.items():
             for beliefs in keys.values():
-                self.print(f"Rest of {source} Beliefs gained in revision: {beliefs}") if self.show_prct and beliefs else ...
+                self.logger.debug(f"Beliefs Gained: Rest of {source} Beliefs gained in revision: {beliefs}", extra=self.agent_info()) if self.logging else ...
+                # self.save_cycle_log("Beliefs Gained", f"Rest of {source} Beliefs gained in revision: {beliefs}")
                 self._new_event(gain, beliefs) # Gained beliefs of new sources/keys
                 
-        self.print(f"Updating beliefs: {belief_dict}") if self.show_prct else ...
         merge_dicts(belief_dict,self.__beliefs)
     
     def _select_event(self) -> Event | None:
@@ -1202,10 +1330,13 @@ class Agent:
     
     def _instant_plan(self, event: Event):
         plans = self._retrieve_plans(event)
-        if plans is None and isinstance(event.data,Goal):
-            self.print(f"No applicable Plan found for {event}")
+        if plans is None:
+            if isinstance(event.data, Goal) and event.change.name == "gain":
+                self.logger.warning(f"Found no applicable plan for {event}", extra=self.agent_info()) if self.logging else ...
+            else:
+                self.logger.debug(f"Found no applicable plan for {event}", extra=self.agent_info()) if self.logging else ...
             return
-        
+            
         args = None
         while plans:
             plan = plans.pop(0)
@@ -1218,10 +1349,13 @@ class Agent:
                 ev_args = event.data._args
             else:
                 ev_args = (event.data._args,)
-            self.save_cycle_log("Instant Plan", self._format_data("Instant Plan",plan,event,ev_args+args),event,plans)
+            self.logger.debug(f"Instant Plan: {self._format_data('Instant Plan',plan,event,ev_args+args)}", extra=self.agent_info()) if self.logging else ...
+            # self.save_cycle_log("Instant Plan", self._format_data("Instant Plan",plan,event,ev_args+args),event,plans)
             self._run_plan(plan,event,ev_args+args,True)
-        elif type(event.data) is Goal:
-            self.print(f"Found no applicable plan for {event.change.name}:{event.data}")
+        elif type(event.data) is Goal and event.change.name == "gain":
+            self.logger.warning(f"Improper context for applicable plan(s) with {event}", extra=self.agent_info()) if self.logging else ...
+        else:
+            self.logger.debug(f"Improper context for applicable plan(s) with {event}", extra=self.agent_info()) if self.logging else ...
     
     def _retrieve_plans(self, event: Event | None) -> List[Plan] | None: 
         if event is None: 
@@ -1232,13 +1366,17 @@ class Agent:
     
     def _select_intention(self, plans: List[Plan] | None, event: Event | None) -> tuple[Plan, Event, tuple] | tuple[None, None, tuple]:
         if plans is None:
-            if event is not None and isinstance(event.data,Goal):
-                self.print(f"No applicable Plan found for {event}")
+            if event is not None and isinstance(event.data,Goal) and event.change.name == "gain":
+                self.logger.warning(f"No applicable Plan found for {event}", extra=self.agent_info()) if self.logging else ...
+            elif event is not None and isinstance(event.data,Belief):
+                self.logger.debug(f"No applicable Plan found for {event}", extra=self.agent_info()) if self.logging else ...
             try:
                 plan, trigger, args = self.__intentions.pop(0)
                 return plan, trigger, args
             except IndexError:
                 return None, None, tuple()
+        if event is None:
+            return None, None, tuple()
         retrieved_plans = plans.copy()
         while retrieved_plans:
             plan = retrieved_plans.pop(0)
@@ -1254,16 +1392,15 @@ class Agent:
                 else:
                     args = ev_args+ctxt
                     
-                #self.print(f'{plan.trigger} {args} {plan.executable(*args)}')
-                
-                #if plan.executable(*args):
                 self.__intentions.append((plan,event,args))
-                #    break
         try:
             plan, trigger, args = self.__intentions.pop(0)
             return plan, trigger, args
         except IndexError:
-            self.print(f"Found no applicable plan for {event.change.name}:{event.data}") if self.show_exec and event is not None else ...
+            if isinstance(event.data,Goal) and event.change.name == "gain":
+                self.logger.warning(f"Improper context for applicable plan(s) for {event}", extra=self.agent_info()) if self.logging else ...
+            else:
+                self.logger.debug(f"Improper context for applicable plan(s) for {event}", extra=self.agent_info()) if self.logging else ...
             return None, None, tuple()
     
     def _retrieve_context(self, plan: Plan) -> tuple | None:
@@ -1363,7 +1500,6 @@ class Agent:
             case _:
                 self.print(f"Unexpected condition: {cnd_type}")
         
-        #print(f'Checking: {v0_data}({v0_args}) {v1_data}({v1_args}) {args} {ret_bool}')  
         if not ret_bool:
             return None
         
@@ -1373,7 +1509,6 @@ class Agent:
         if v1_args:
             f_args += v1_data
         f_args += args
-        #self.print(f'Returning {f_args}')
         return f_args
     
     def _force_close_thread(self, thread: threading.Thread):
@@ -1394,35 +1529,50 @@ class Agent:
         try:
             assert trigger is not None, f"Unexpected None Trigger with {chosen_plan}:{args}"
             self.__running_intentions.append((chosen_plan, trigger, args))
+            if self.my_name == "anager":
+                print(f"{self.tcolor}Agent:{self.my_name}> Intention Appended{bcolors.ENDCOLOR}")
             plan_thread = threading.Thread(target=self._run_plan, args=(chosen_plan,trigger,args))
             plan_thread.start()
+            if self.my_name == "anager":
+                print(f"{self.tcolor}Agent:{self.my_name}> Thread Created{bcolors.ENDCOLOR}")
         except RunPlanError:
             self.print(f"{chosen_plan} failed")
 
     def _run_plan(self, plan: Plan, trigger: Event, args: tuple, instant_flag: bool = False):
         self.print(f"Running {plan}")  if self.show_exec or self.show_cycle else ...
         try:
-            trigger_type = trigger.data
-            if type(trigger_type) is Goal:
-                self.last_goal = trigger_type
-                self.last_event = trigger
-                if trigger_type in self.__goals[trigger_type.source][trigger_type.key]:
-                    self.__goals[trigger_type.source][trigger_type.key].remove(trigger_type)
-                    self.update_lists(trigger_type,"rm")
+            try:      
+                result = plan.body(self, trigger.data.source, *args)
+            except TypeError as e:
+                if "object is not callable" in str(e):
+                    result = "DirectDecorator"
                 else:
-                    self.print(f"{trigger_type} lost before correct execution")
-                    
-            result = plan.body(self, trigger.data.source, *args)
-            if not instant_flag:
-                self.__running_intentions.remove((plan,trigger,args))
-                self.last_intention = (plan,trigger,args)
+                    raise 
                 
+            self.last_event = trigger
+            trigger_type = trigger.data    
+            if result == "Error" or result == -1:
+                self.logger.warning(f"{plan} did not complete successfully", extra=self.agent_info()) if self.logging else ...
+            else:
+                for intention in self.__intentions:
+                    if trigger_type == intention[1].data:
+                        self.__intentions.remove(intention)
+                if not instant_flag:
+                    self.__running_intentions.remove((plan,trigger,args))
+                    self.last_intention = (plan,trigger,args)
+
+                if type(trigger_type) is Goal:
+                    self.last_goal = trigger_type
+                    if self.has(trigger_type):
+                        self.rm(trigger_type)
+                    else:
+                        self.logger.warning(f"{trigger_type} lost by another plan execution", extra=self.agent_info()) if self.logging else ...
             self.last_plan = plan
             return result
         except Exception as e:
             buffer = f"<{self.my_name}> Error while executing {plan}:\n\tTrigger={trigger} | Context={args}\n\t{repr(e)}\n"
             _, _, exc_traceback = sys.exc_info()
-            tb_entries = traceback.extract_tb(exc_traceback)
+            tb_entries = extract_tb(exc_traceback)
             
             #excluded_files = ['agent.py', 'communication.py', 'admin.py', 'environment.py']
             
@@ -1434,17 +1584,33 @@ class Agent:
             if filtered_entries:
                 buffer += "  Filtered Traceback (most recent call last):\n"
                 for entry in filtered_entries:
-                    buffer +=f'  File "{entry.filename}", line {entry.lineno}, in {entry.name}, during cycle {self.cycle_counter}\n'
+                    buffer +=f'\tFile "{entry.filename}", line {entry.lineno}, in {entry.name}, during cycle {self.cycle_counter}\n'
                     if entry.line:
-                        buffer += f'    {entry.line}'
+                        buffer += f'\t\t{entry.line}'
+                if "positional argument" in str(e):
+                    buffer += f"\n\tCheck Plan '{plan.body.__name__}' for self, src, and trigger/context args"
             else:
                 buffer += " No matching traceback entries found."
             print(buffer)
-            exit(1) 
+            exit(-1) 
     
     def save_cycle_log(self, decision: str, description: Any | None = None, event: Event | None = None, plans: List[Plan] | None = None) -> None:
         log: Dict[str, Any] = {"cycle":self.cycle_counter}
-        info = {"decision":decision,"description":description,"beliefs":self.belief_list.copy(),"goals":self.goal_list.copy(),"running_goal":self.last_goal,"last_recv":self.last_recv,"event":event,"last_event":self.last_event,"retrieved_plans":plans,"intentions":self.__intentions.copy(),"events":self.__events.copy(),"connected_envs":list(self._environments.keys()), "connected_chs":list(self._channels.keys())}
+        info = {
+            "decision":decision,
+            "description":description,
+            "beliefs":self.belief_list.copy(),
+            "goals":self.goal_list.copy(),
+            "running_goal":self.last_goal,
+            "last_recv":self.last_recv,
+            "event":event,
+            "last_event":self.last_event,
+            "retrieved_plans":plans,
+            "intentions":self.__intentions.copy(),
+            "events":self.__events.copy(),
+            "connected_envs":list(self._environments.keys()), 
+            "connected_chs":list(self._channels.keys())
+        }
         self.last_recv = []
         self.last_goal = None
         if self.last_log != info and (self.running or self.cycle_counter == 0):
@@ -1465,7 +1631,7 @@ class Agent:
     
     def _format_data(self, decision: str, chosen_plan: Plan | None = None, trgr: Event | None = None, args: tuple | None = None, data_type: Iterable[Belief | Goal] | Belief | Goal | None = None, instant: bool | None = False) -> str:
         match decision:
-            case "Adding Info" | "Removing Info":
+            case "Adding Info" | "Removing Info" | "Testing Info":
                 return f'{data_type}  -  instant[{instant}]'
             case "Execute Intention" | "Running Intention" | "Instant Plan":
                 assert trgr is not None
