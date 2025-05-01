@@ -14,13 +14,6 @@ uses a Knowledge Query Model Language to model the communication between agents
 using acts of speech, or perfomatives, as a base model, in this way an agent can ask, tell,
 command or teach anything it needs and knows.
 
-Table of Contents
-- [`Managing Beliefs and Goals`](#Managing-Beliefs-and-Goals): Creating, removing and using Beliefs and Goals
-- [`Defining plans`](#Defining-plans): Proprieties for the definition of Plans
-- [`Communication between Agents`](#Communication-between-Agents): How to send messages between Agents
-- [`Managing the Environment`](#Environment): How to create Environments and its Percepts
-- [`Internal Functions`](#Internal-Functions): All available MASPY functions.
-
 ## Install
 
 To install [MASPY](https://pypi.org/project/maspy-ml/) you can use package-management system `pip`: 
