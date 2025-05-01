@@ -14,6 +14,8 @@ uses a Knowledge Query Model Language to model the communication between agents
 using acts of speech, or perfomatives, as a base model, in this way an agent can ask, tell,
 command or teach anything it needs and knows.
 
+For a more in-detph documentation, see our [WIKI](https://github.com/laca-is/MASPY/wiki)
+
 ## Install
 
 To install [MASPY](https://pypi.org/project/maspy-ml/) you can use package-management system `pip`: 
