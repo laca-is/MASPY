@@ -66,6 +66,7 @@ class Channel(metaclass=CommsMultiton):
         self.send_counter = 0
         self.send_counter_agent: Dict[str,int] = dict()
         self.messages_log: Dict[float, List[Dict[str, Any]]] = dict()
+        self.logger.info(f"Channel {self.my_name} created", extra=self.ch_info)
         
     def print(self,*args, **kwargs):
         if not self.printing: 
@@ -107,8 +108,10 @@ class Channel(metaclass=CommsMultiton):
         else:
             self.agent_list[type(agent).__name__] = {agent.tuple_name[0] : {ag_name}}
             self._agents[ag_name] = agent
-            
-        # self.logger.info(f'Connecting agent {type(agent).__name__}:{agent.tuple_name}', extra=self.ch_info)
+        
+        self.print(f"Agent {type(agent).__name__}:{agent.tuple_name} added to channel {self.my_name}") if self.show_exec else None
+        if self.my_name != "default":
+            self.logger.info(f'Connecting agent {type(agent).__name__}:{agent.tuple_name}', extra=self.ch_info)
 
     def _rm_agents(self, agents: Union[List['Agent'],'Agent']):
         if isinstance(agents, list):
@@ -124,7 +127,8 @@ class Channel(metaclass=CommsMultiton):
             del self._agents[ag_name]
             self.agent_list[type(agent).__name__][agent.tuple_name[0]].remove(ag_name)
         
-        # self.logger.info(f'Desconnecting agent {type(agent).__name__}:{agent.tuple_name}', extra=self.ch_info)
+        self.print(f"Agent {type(agent).__name__}:{agent.tuple_name} removed from channel {self.my_name}") if self.show_exec else None
+        self.logger.info(f'Desconnecting agent {type(agent).__name__}:{agent.tuple_name}', extra=self.ch_info)
 
     def _send(self, sender: str, target: str | List[str] | broadcast, act: Act, message: Union['Belief', 'Goal', 'Ask', 'Plan'] | List[Union['Belief', 'Ask', 'Goal', 'Plan']]):  
         messages = []
@@ -137,7 +141,7 @@ class Channel(metaclass=CommsMultiton):
             for msg in messages:
                 if isinstance(target,list):
                     for trgt in target:
-                        assert isinstance(trgt, tuple)
+                        assert isinstance(trgt, str)
                         self._sending(sender,trgt,act,msg)
                 elif is_broadcast(target):
                     for agent_name in self._agents.keys():
@@ -147,29 +151,30 @@ class Channel(metaclass=CommsMultiton):
                     self._sending(sender,target,act,msg)
         except AssertionError:
             raise
+        self.logger.info(f'Message Sent', extra=self.ch_info) 
         
+        # cur_time = self.sys_time()
+        # if target == broadcast:
+        #     target = "broadcast"
+        # msg_dict = {"sender":sender,"target":target,"act":act.name,"message":message}
+        # if cur_time in self.messages_log:
+        #     self.messages_log[cur_time].append(msg_dict)
+        # else:
+        #     self.messages_log[cur_time] = [msg_dict]
         
-        cur_time = self.sys_time()
-        if target == broadcast:
-            target = "broadcast"
-        msg_dict = {"sender":sender,"target":target,"act":act.name,"message":message}
-        if cur_time in self.messages_log:
-            self.messages_log[cur_time].append(msg_dict)
-        else:
-            self.messages_log[cur_time] = [msg_dict]
+        # #print(f'\n{self.messages_log}\n')
         
-        #print(f'\n{self.messages_log}\n')
-        
-        with Lock():
-            self.send_counter += 1
-            sender = sender.split("_")[0]
-            if sender not in self.send_counter_agent:
-                self.send_counter_agent[sender] = 1
-            else:
-                self.send_counter_agent[sender] += 1
+        # with Lock():
+        #     self.send_counter += 1
+        #     sender = sender.split("_")[0]
+        #     if sender not in self.send_counter_agent:
+        #         self.send_counter_agent[sender] = 1
+        #     else:
+        #         self.send_counter_agent[sender] += 1
                 
     
     def _sending(self, sender: str, target: str, act: Act, msg: Union['Belief', 'Goal', 'Ask', 'Plan']):
+        self.print(f'{sender} sending {act.name}:{msg} to {target}') if self.show_exec else None
         self.logger.info(f'{sender} sending {act.name}:{msg} to {target}', extra=self.ch_info)   
 
         from maspy.agent import Belief, Goal, Ask, Plan
@@ -191,7 +196,7 @@ class Channel(metaclass=CommsMultiton):
     def parse_sent_msg(self, sender: str, act: Act, msg: Union['Belief', 'Goal', 'Ask', 'Plan']):
         from maspy.agent import Belief, Goal, Ask
         if isinstance(msg, Belief | Goal) and msg is not None:
-            msg = msg.update(source=sender)
+            object.__setattr__(msg, 'source', sender)
         if act in [askOne,askAll] and isinstance(msg, Belief | Goal):
             msg = Ask(msg, source=sender)
         return msg

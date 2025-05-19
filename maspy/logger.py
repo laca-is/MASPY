@@ -39,12 +39,12 @@ class MyJSONFormatter(Formatter):
     @override
     def format(self, record: LogRecord) -> str:
         with Lock():
-            message = self._prepare_log_dict(record)
-            return dumps(message, default=str)
+            desc = self._prepare_log_dict(record)
+            return dumps(desc, default=str)
     
     def _prepare_log_dict(self, record: LogRecord) -> Dict[str, str | Any]:
         always_fields = {
-            "message": record.getMessage(),
+            "desc": record.getMessage(),
             "timestamp": datetime.fromtimestamp(
                 record.created, tz=timezone.utc
             ).isoformat(),
@@ -55,16 +55,16 @@ class MyJSONFormatter(Formatter):
         if record.stack_info is not None:
             always_fields["stack_info"] = self.formatStack(record.stack_info)
         
-        message = {
+        desc = {
             key: msg_val 
             if (msg_val := always_fields.pop(val, None)) is not None
             else getattr(record, val)
             for key, val in self.fmt_keys.items()
         }
-        message.update(always_fields)
+        desc.update(always_fields)
         
         for key, val in record.__dict__.items():
             if key not in LOG_RECORD_BUILTIN_ATTRS:
-                message[key] = val
+                desc[key] = val
         
-        return message
+        return desc

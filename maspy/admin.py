@@ -18,14 +18,14 @@ import atexit
 import os
 import sys
 
-MASPY_VERSION = "0.6.0"
+MASPY_VERSION = "0.6.4"
 
 TAgent = TypeVar('TAgent', bound=Agent)
 TEnv = TypeVar('TEnv', bound=Environment)
 TChannel = TypeVar('TChannel', bound=Channel)
 
 def setup_logging():
-    config_file = Path("maspy/logger_config.json")
+    config_file = Path(f"{os.path.dirname(__file__)}/logger_config.json")
     with open(config_file) as f:
         config = json.load(f)
         
@@ -62,14 +62,16 @@ class AdminMeta(type):
         return cls._instances[cls]
     
 class Admin(metaclass=AdminMeta):    
-    def __init__(self:'Admin') -> None:
+    def __init__(self:'Admin', start_logger = False) -> None:
         self.logger = logging.getLogger("maspy")
-        #setup_logging()
+        self.logging = start_logger
+        setup_logging() if start_logger else ...
         signal.signal(signal.SIGINT, self.stop_all_agents)
         self.end_of_execution = False
         self._name = f"# {type(self).__name__} #"
         self.print(f"Starting MASPY Program - {MASPY_VERSION}")
         self.logger.info(f"Starting MASPY Program - {MASPY_VERSION}", extra={"class_name": "Admin"})
+        
         self.show_exec = False
         self.agt_sh_exec = False
         self.agt_sh_cycle = False
@@ -77,6 +79,7 @@ class Admin(metaclass=AdminMeta):
         self.agt_sh_slct = False
         self.ch_sh_exec = False
         self.env_sh_exec = False
+        
         self._started_agents: List[Agent] = list()
         self._agent_list: Dict[tuple, str] = dict()
         self._num_agent: Dict[str, int] = dict()
@@ -131,12 +134,14 @@ class Admin(metaclass=AdminMeta):
             
         assert isinstance(name,str), f"Agent name must be a string, got {type(name)}"
         if name in self._num_agent:
-            self._agents[(name,1)].my_name = f'{name}_1'
+            self._agents[(name,1)].unique = False
             self._num_agent[name] += 1
             agent.tuple_name = (name, self._num_agent[name])
             agent.my_name = f'{name}_{str(self._num_agent[name])}'
         else:
+            agent.unique = True
             self._num_agent[name] = 1
+            agent.my_name = f'{name}_1'
             agent.tuple_name = (name, 1)
 
         
@@ -148,6 +153,7 @@ class Admin(metaclass=AdminMeta):
         agent.show_cycle = self.agt_sh_cycle
         agent.show_prct = self.agt_sh_prct
         agent.show_slct = self.agt_sh_slct
+        agent.logging = self.logging
         if type(agent).__name__ in self._agent_class_color:
             agent.tcolor = self._agent_class_color[type(agent).__name__]
         else:
@@ -260,6 +266,7 @@ class Admin(metaclass=AdminMeta):
             
             self.stop_all_agents()
             self.sys_running = False
+            self.logger.info("MASPY Program Ended", extra={"class_name": "Admin"})
             return
         except Exception as e:
             self.print(e)
@@ -319,6 +326,8 @@ class Admin(metaclass=AdminMeta):
         self.logger.info("Ending MASPY Program", extra={"class_name": "Admin"})
         if self._report_lock:
             return
+        self._report_lock = True
+        
         self.elapsed_time = time() - self.start_time
         self.print("[Closing System]")
         self.print_running()
@@ -331,7 +340,6 @@ class Admin(metaclass=AdminMeta):
             #json_string = json.dumps(self.system_info, indent=2)
             pprint.pprint(self.system_info, indent=2, sort_dicts=False)
         if (self.full_report or self.report) and not self._report_lock:
-            self._report_lock = True
             self.print("Making System Report...")
             return self._print_report()
             self.print("System Report Completed")

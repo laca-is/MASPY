@@ -1,11 +1,13 @@
 from typing import TYPE_CHECKING, Any, Sequence
 from collections import defaultdict
-from maspy.learning.core import Model
+from maspy.learning.core import Model, HashableWrapper
 from maspy.learning.space import Discrete
 from maspy.learning.ml_utils import monte_carlo_selection
 from enum import Enum
 from itertools import product, combinations, permutations
 import numpy as np
+import pickle
+import sys
 
 if TYPE_CHECKING:
     from maspy.environment import Environment, Action
@@ -31,17 +33,29 @@ class EnvModel(Model):
         states = env._states.copy()
         actions = env._actions.copy()
         from maspy.environment import Action
-        self.actions_list: list[str] = []
-        self.actions_dict: dict[str, Action] = {}
+        self.actions_list: list[HashableWrapper] = []
+        self.actions_dict: dict[HashableWrapper, Action] = {}
         self.orginize_actions(actions)
         self.off_policy = False
+  
+        value_lists: list = list(states.values())
+        tuples_values: list = []
+        for value in value_lists:
+            if isinstance(value, list): 
+                if len(value_lists) == 1:
+                    tuples_values = value_lists
+                else:
+                    tuples_values.append(tuple(value))
+            elif not type(value).__dict__.get("__hash__"):
+                tuples_values.append((value,))
+            else:
+                tuples_values.append(value)
+        aux_list = list(product(*tuples_values))
+        self.states_list: list[HashableWrapper] = []
+        for stt in aux_list:
+            self.states_list.append(HashableWrapper(stt))
         
-        #print(self.actions_list)
-        state: dict = {}
-        keys = states.keys()
-        value_lists = list(states.values())
-        self.states_list = list(product(*value_lists))
-        self.terminated_states: list[tuple] = []
+        self.terminated_states: list[HashableWrapper] = []
         
         self.num_actions = len(self.actions_list)
         self.P = {
@@ -59,7 +73,7 @@ class EnvModel(Model):
         else:
             self.make_policy_table(env, states)
         
-        self.curr_state = self.initial_state_distrib[np.random.randint(0, len(self.initial_state_distrib))]       
+        self.curr_state = self.initial_state_distrib[np.random.randint(0, len(self.initial_state_distrib))]     
         self.action_space = Discrete(len(self.actions_list))
         self.observation_space = Discrete(len(self.states_list))
         
@@ -72,16 +86,15 @@ class EnvModel(Model):
         from maspy.environment import Percept
         for stt, (name, _) in zip(self.curr_state, self.initial_states.items()):
             percept = self.env.get(Percept(name),ck_args=False)
+            if isinstance(stt, frozenset):
+                stt = dict(stt)
             self.env.change(percept, stt)
     
     def orginize_actions(self, actions: list['Action']):
         for action in actions:
             if action.act_type == 'listed':
-                if isinstance(action.data,str):
-                    self.actions_list.append(action.data)
-                    self.actions_dict[action.data] = action
-                    continue
                 for args in action.data:
+                    args = HashableWrapper(args)
                     self.actions_list.append(args)
                     self.actions_dict[args] = action
                                 
@@ -90,6 +103,7 @@ class EnvModel(Model):
                 for i in range(1, len(action.data) + 1):
                     act_comb.extend(combinations(action.data, i))
                 for args in act_comb:
+                    args = HashableWrapper(args)
                     self.actions_list.append(args)
                     self.actions_dict[args] = action
                     
@@ -98,6 +112,7 @@ class EnvModel(Model):
                 for i in range(1, len(action.data) + 1):
                     act_perm.extend(permutations(action.data, i))
                 for args in act_perm:
+                    args = HashableWrapper(args)
                     self.actions_list.append(args)
                     self.actions_dict[args] = action
                 
@@ -112,12 +127,13 @@ class EnvModel(Model):
                         ranges.append(range(args))
                 act_cart = list(product(*ranges))
                 for args in act_cart:
+                    args = HashableWrapper(args)
                     self.actions_list.append(args)
                     self.actions_dict[args] = action
             else:
                 print(f"Unsupported action type: {action.act_type}")
     
-    def make_policy_table(self, env: 'Environment', states: dict[str, Sequence]):
+    def make_policy_table(self, env: 'Environment', states: dict[str, list]):
         state: dict = {}
         keys = states.keys()
         assert isinstance(env.possible_starts, dict), "possible_starts must be a dict when not off-policy"
@@ -130,9 +146,11 @@ class EnvModel(Model):
             [item] if not isinstance(item, list | tuple | set) 
             else list(item) for item in start_list
         ]
+        
         self.initial_states = env.possible_starts.copy()
-        self.initial_state_distrib = list(product(*normalized))
-
+        aux_dist = list(product(*normalized))
+        self.initial_state_distrib = [ HashableWrapper(item) for item in aux_dist ]
+        
         for stt in self.states_list:                
             for act in self.actions_list:
                 action = self.actions_dict[act]
@@ -146,14 +164,14 @@ class EnvModel(Model):
                 if len(action.data) == 1:
                     results = func(env,state)
                 else:
-                    results = func(env,state,act)
+                    results = func(env,state,act.original)
                 assert isinstance(results, tuple), "transition returns must be at least state e reward"
                 self.add_transition(stt, results, act)    
                 
-    def add_transition(self, state, results: tuple, action: Any):
-        #print(state, " - ",action, " - ",results)
+    def add_transition(self, state: HashableWrapper, results: tuple, action: Any):
+        #print(state, " - ",results, " - ",action)
         action_idx = self.actions_list.index(action)
-        new_state: tuple = tuple(results[0].values())
+        new_state: HashableWrapper = HashableWrapper(tuple(results[0].values()))
         reward: float | int = results[1]
         probability: float = 1.0
         terminated: bool = False
@@ -166,7 +184,7 @@ class EnvModel(Model):
                 
         self.P[state][action_idx].append((probability, new_state, reward, terminated))
         
-    def learn(self, learn_method: Learn_Method, learning_rate: float = 0.05, discount_factor: float = 0.8, epsilon: float = 1, final_epsilon: float = 0.1, max_steps: int | None = None, num_episodes: int = 10000):
+    def learn(self, learn_method: Learn_Method, learning_rate: float = 0.05, discount_factor: float = 0.8, epsilon: float = 1, final_epsilon: float = 0.1, max_steps: int | None = None, num_episodes: int = 10000, load_learning: bool = False):   
         
         self.learning_rate = learning_rate
         self.learning_rate_policy = 0.01
@@ -178,38 +196,46 @@ class EnvModel(Model):
         
         self.training_error: list = [] 
         
-        self.q_table: dict = defaultdict(lambda: np.zeros(self.num_actions))
-        self.value_table: dict = defaultdict(lambda: 0.0)
-        self.policy_table: dict = defaultdict(lambda: np.full(self.num_actions, 1 / self.num_actions))
+        if load_learning:
+            self.load_learning(f'{self.name}_{learn_method.name}_{learning_rate}_{discount_factor}_{epsilon}_{final_epsilon}_{num_episodes}_{max_steps}.pkl')
+        else:
+            self.q_table: dict = defaultdict(lambda: np.zeros(self.num_actions))
+            self.value_table: dict = defaultdict(lambda: 0.0)
+            self.policy_table: dict = defaultdict(lambda: np.full(self.num_actions, 1 / self.num_actions))
         
         self.reset_percepts()
-        #for i, p in self.P.items():
-        #    for a, x in p.items():
-        #        print(i, self.actions_list[a], x) if x[0][-1] == True else ...
-        for _ in range(num_episodes):
+        for i in self.progress_bar(range(1, num_episodes+1), "Training"):
             self.reset()
-            #print(f"Episode {_}")
             done = False
             step = 0
+            next_state: HashableWrapper
             while not done and not (max_steps and step >= max_steps):
                 action = self.get_action()
                 old_state = self.curr_state
                 if self.off_policy:
-                    action_str = self.actions_list[action]
-                    results = self.actions_dict[action_str].transition(self.env, *self.curr_state, action_str)
-                    next_state = self.curr_state = (results[0],)
-                    reward = results[1]
+                    action_hashed = self.actions_list[action]
+                    act = action_hashed.original
+                    curr_stt = self.curr_state.original
+                    stt_len = len(curr_stt)
+                    
+                    results = self.actions_dict[action_hashed].transition(self.env, *curr_stt, act)
+                    
+                    if stt_len == 1:
+                        next_state = self.curr_state = HashableWrapper((results[:stt_len],))
+                    else:
+                        next_state = self.curr_state = HashableWrapper(results[:stt_len])
+                    reward = results[stt_len]
                     probability = 1.0
                     terminated = False
                     
-                    for result in results[2:]:
+                    for result in results[stt_len+1:]:
                         if isinstance(result, float):
                             probability = result
                         elif isinstance(result, bool):
                             terminated = result
                 else:
                     next_state, reward, terminated, truncated, info = self.step(action)
-                #print(f'{old_state} {self.actions_list[action]} {next_state} {reward}')
+                
                 match learn_method.name:
                     case "qlearning":
                         self.q_learning_update(old_state, next_state, action, reward, terminated)
@@ -221,11 +247,35 @@ class EnvModel(Model):
                     done = True
                     self.terminated_states.append(next_state)
                 step += 1
-            #if step < 50:
-            #     print("terminated in ", step, "steps")
-            #print(self.training_error[-1])
+            
             self.epsilon = max(self.final_epsilon, self.epsilon - self.epsilon_decay)
         
+        self.save_learning(f"{self.name}_{learn_method.name}_{learning_rate}_{discount_factor}_{epsilon}_{final_epsilon}_{num_episodes}_{max_steps}.pkl")
+
+    def save_learning(self, filename: str):
+        with open(filename, 'wb') as file:
+            pickle.dump(dict(self.q_table), file)
+    
+    def load_learning(self, filename: str | None = None):
+        if filename is None:
+            filename = "q_table.pkl"
+        print("Loading Model...",end=" ",flush=True)
+        with open(filename, 'rb') as file:
+            loaded_q_table = pickle.load(file)
+        self.q_table = defaultdict(lambda: np.zeros(self.num_actions), loaded_q_table)
+        print("Model Loaded!")
+    
+    def progress_bar(self, iterable, prefix='', length=50):
+        total = len(iterable)
+        for i, item in enumerate(iterable):
+            percent = (i + 1) / total
+            filled = int(length * percent)
+            bar = '█' * filled + '-' * (length - filled)
+            sys.stdout.write(f'\r{prefix}: {i+1}/{total} |{bar}| {percent:.0%}')
+            sys.stdout.flush()
+            yield item
+        print() 
+    
     def q_learning_update(self, state, next_state, action: int, reward, terminated):
         q_table = (not terminated) * np.max(self.q_table[next_state])
         
@@ -280,21 +330,28 @@ class EnvModel(Model):
         self.training_error.append(td_error)
 
         
-    def get_action(self, state: tuple | None = None):
+    def get_action(self, state: tuple | HashableWrapper | None = None):
         if state is not None:
-            #return monte_carlo_selection(self.q_table[state])
+            state = HashableWrapper(state)
+            #action = monte_carlo_selection(self.q_table[state])
+            #print(f'state: {state} : {self.q_table[state]} > [{action}]{self.actions_list[action]}')
+            #return action
             return int(np.argmax(self.q_table[state]))
         
         if np.random.uniform(0, 1) < self.epsilon:
             return self.action_space.sample()
         
-        #return monte_carlo_selection(self.q_table[self.curr_state])
-        return int(np.argmax(self.q_table[self.curr_state]))
+        return monte_carlo_selection(self.q_table[self.curr_state])
+        #return int(np.argmax(self.q_table[self.curr_state]))
 
-    def get_state(self):
+    def get_state(self) -> tuple: 
         from maspy.environment import Percept
-        state = ()
+        state: tuple = tuple()
         for name in self.initial_states.keys():
             percept = self.env.get(Percept(name),ck_args=False)
+            assert isinstance(percept, Percept)
             state += (percept.args,)
-        return state
+        if state in self.terminated_states or HashableWrapper(state) in self.terminated_states:
+            return state, True
+        else:
+            return state, False

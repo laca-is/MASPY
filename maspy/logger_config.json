@@ -3,13 +3,13 @@
     "disable_existing_loggers": false,
     "formatters": {
         "simple": {
-            "format": "[%(levelname)s] %(class_name)s:%(my_name)s> %(message)s"
+            "format": "[%(levelname)s] %(class_name)s:%(my_name)s> %(desc)s"
         },
         "simple_json": {
             "()": "maspy.logger.MyJSONFormatter",
             "fmt_keys":{
                 "level": "levelname",
-                "message": "message",
+                "desc": "desc",
                 "function": "funcName"
             }
         },
@@ -17,7 +17,7 @@
             "()": "maspy.logger.MyJSONFormatter",
             "fmt_keys":{
                 "level": "levelname",
-                "message": "message",
+                "desc": "desc",
                 "timestamp": "timestamp",
                 "logger": "name",
                 "function": "funcName",

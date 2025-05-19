@@ -17,6 +17,7 @@ class Percept:
     _args: tuple | Any = field(default_factory=tuple)
     _group: str | Group = DEFAULT_GROUP
     adds_event: bool = True
+    source: str = field(default_factory=str)
     
     @property
     def args(self):
@@ -68,9 +69,9 @@ class Percept:
 
     def __str__(self) -> str:
         if self.group == DEFAULT_GROUP:
-            return f"Percept{self.key,self._args}"
+            return f"Percept{self.key,self._args,self.source}"
         else:
-            return f"Percept{self.key,self._args,self.group}"
+            return f"Percept{self.key,self._args,self.group,self.source}"
     
     def __repr__(self):
         return self.__str__()
@@ -163,13 +164,14 @@ class Environment(metaclass=EnvironmentMultiton):
         
         self.possible_starts: dict | str = dict()
         self._actions: List[Action]
-        self._states: Dict[str, Sequence] = dict()
+        self._states: Dict[str, list] = dict()
         self._state_percepts: Dict[str, Percept] = dict()
         try:    
             if not self._actions:
                 self._actions = []
         except AttributeError:
             self._actions = []
+        self.logger.info(f"Environment {self.my_name} created", extra=self.env_info)
     
     def print(self,*args, **kwargs):
         if not self.printing:
@@ -242,7 +244,10 @@ class Environment(metaclass=EnvironmentMultiton):
             self.agent_list[type(agent).__name__] = {agent.tuple_name[0] : {ag_name}}
             
         self._agents[ag_name] = agent
-        # self.logger.info(f'Connecting Agent {type(agent).__name__}:{agent.my_name}', extra=self.env_info)
+        
+        if hasattr(self, 'on_connect'):
+            getattr(self, 'on_connect')(ag_name)
+        self.logger.info(f'Connecting Agent {type(agent).__name__}:{agent.my_name}', extra=self.env_info)
     
     def _rm_agents(
         self, agents: Union[Iterable['Agent'], 'Agent']
@@ -261,7 +266,7 @@ class Environment(metaclass=EnvironmentMultiton):
             assert isinstance(agent.tuple_name, tuple)
             del self._agents[ag_name]
             self.agent_list[type(agent).__name__][agent.tuple_name[0]].remove(ag_name)
-        # self.logger.info(f'Disconnecting Agent {type(agent).__name__}:{agent.my_name}', extra=self.env_info)
+        self.logger.info(f'Disconnecting Agent {type(agent).__name__}:{agent.my_name}', extra=self.env_info)
     
     def create(self, percept: List[Percept] | Percept):
         percept_dict = self._clean(percept)
@@ -270,7 +275,7 @@ class Environment(metaclass=EnvironmentMultiton):
         merge_dicts(percept_dict, aux_percepts)
         with self.lock:
             self._percepts = aux_percepts
-        # self.logger.info(f'Creating {percept}', extra=self.env_info)
+        self.logger.info(f'Creating {percept}', extra=self.env_info)
         
         if isinstance(percept, list):
             for prcpt in percept:
@@ -283,7 +288,7 @@ class Environment(metaclass=EnvironmentMultiton):
         self._state_percepts[percept.key] = percept
         match percept.group:
             case "listed":
-                self._states[percept.key] = percept.args 
+                states = percept.args
             case "combination":
                 if percept.args_len == 2 and isinstance(percept.args[0], Sequence) and isinstance(percept.args[1], int):
                     comb = list(combinations(percept.args[0], percept.args[1]))
@@ -291,12 +296,12 @@ class Environment(metaclass=EnvironmentMultiton):
                     comb = []
                     for i in range(1, len(percept.args) + 1):
                         comb.extend(combinations(percept.args, i))
-                self._states[percept.key] = comb
+                states = comb
             case "permutation":
                 perm: list = []
                 for i in range(1, len(percept.args) + 1):
                     perm.extend(permutations(percept.args, i))
-                self._states[percept.key] = perm
+                states = perm
             case "cartesian":
                 ranges: list = []
                 for arg in percept._args:
@@ -309,9 +314,12 @@ class Environment(metaclass=EnvironmentMultiton):
                     else:
                         self.logger.warning(f'{arg}:{type(arg)} is not a valid type',extra=self.env_info)
                 cart = list(product(*ranges))
-                self._states[percept.key] = cart
+                states = cart
+        if percept.key in self._states:
+            self._states[percept.key] += states
+        else: 
+            self._states[percept.key] = states
                         
-
     def get(self, percept:Percept, all=False, ck_group=False, ck_args=True) -> List[Percept] | Percept | None:
         found_data = []
         ## self.logger.debug(f'Getting percept like: {percept}', extra=self.env_info)
@@ -359,6 +367,13 @@ class Environment(metaclass=EnvironmentMultiton):
         with self.lock:
             if isinstance(percept, Percept):
                 percept._args = new_args
+                
+        assert isinstance(percept, Percept)        
+        if percept.key in self._state_percepts:
+            del self._state_percepts[percept.key]
+            del self._states[percept.key]     
+        if percept.group in Group._member_names_:
+            self._add_state(percept)
             
     def _percept_exists(self, key, args, group=DEFAULT_GROUP) -> bool:
         if type(args) is not tuple: 
@@ -380,10 +395,12 @@ class Environment(metaclass=EnvironmentMultiton):
             case None:
                 return dict()
             case Percept():
+                object.__setattr__(percept_data, "source", self.my_name)
                 return {percept_data.group : {percept_data.key: {percept_data}}}
             case Iterable():
                 percept_dict: Dict[str, Dict[str, set]] = dict()
                 for prc_dt in percept_data:
+                    object.__setattr__(prc_dt, "source", self.my_name)
                     if prc_dt.key in percept_dict[prc_dt.group]:
                         percept_dict[prc_dt.group][prc_dt.key].add(prc_dt)
                     else:
