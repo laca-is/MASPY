@@ -3,7 +3,7 @@
     "disable_existing_loggers": false,
     "formatters": {
         "simple": {
-            "format": "[%(levelname)s] %(class_name)s:%(my_name)s> %(desc)s"
+            "format": "[%(levelname)s] %(class_name)s:%(my_name)s> %(message)s"
         },
         "simple_json": {
             "()": "maspy.logger.MyJSONFormatter",

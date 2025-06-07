@@ -28,6 +28,7 @@ listed = Group.listed
 class EnvModel(Model):
     def __init__(self, env: 'Environment') -> None:
         super().__init__()
+        print(f'Creating model for {env.my_name}')
         self.name = env.my_name
         self.env = env
         states = env._states.copy()
@@ -39,6 +40,7 @@ class EnvModel(Model):
         self.off_policy = False
   
         value_lists: list = list(states.values())
+        #print('States: ',value_lists)
         tuples_values: list = []
         for value in value_lists:
             if isinstance(value, list): 
@@ -50,9 +52,11 @@ class EnvModel(Model):
                 tuples_values.append((value,))
             else:
                 tuples_values.append(value)
+        #print('Tuples: ',tuples_values)
         aux_list = list(product(*tuples_values))
         self.states_list: list[HashableWrapper] = []
         for stt in aux_list:
+            #print('Moddeling: ',stt)
             self.states_list.append(HashableWrapper(stt))
         
         self.terminated_states: list[HashableWrapper] = []
@@ -151,7 +155,7 @@ class EnvModel(Model):
         aux_dist = list(product(*normalized))
         self.initial_state_distrib = [ HashableWrapper(item) for item in aux_dist ]
         
-        for stt in self.states_list:                
+        for stt in self.states_list:               
             for act in self.actions_list:
                 action = self.actions_dict[act]
                 if action.transition is not None:
@@ -195,6 +199,8 @@ class EnvModel(Model):
         self.final_epsilon = final_epsilon
         
         self.training_error: list = [] 
+        self.trend: dict = {'avg': 0, 'slope': 0}
+        self.episode_steps: list = []
         
         if load_learning:
             self.load_learning(f'{self.name}_{learn_method.name}_{learning_rate}_{discount_factor}_{epsilon}_{final_epsilon}_{num_episodes}_{max_steps}.pkl')
@@ -202,7 +208,8 @@ class EnvModel(Model):
             self.q_table: dict = defaultdict(lambda: np.zeros(self.num_actions))
             self.value_table: dict = defaultdict(lambda: 0.0)
             self.policy_table: dict = defaultdict(lambda: np.full(self.num_actions, 1 / self.num_actions))
-        
+            
+        self.states_buffer = []
         self.reset_percepts()
         for i in self.progress_bar(range(1, num_episodes+1), "Training"):
             self.reset()
@@ -217,10 +224,16 @@ class EnvModel(Model):
                     act = action_hashed.original
                     curr_stt = self.curr_state.original
                     stt_len = len(curr_stt)
-                    
-                    results = self.actions_dict[action_hashed].transition(self.env, *curr_stt, act)
-                    
-                    if stt_len == 1:
+                    try:
+                        results = self.actions_dict[action_hashed].transition(self.env, *curr_stt, act)
+                    except Exception as e:
+                        print('\n',e)
+                        print(f'@ Current State: {curr_stt}, Action: {action_hashed}')
+                        for buff in self.states_buffer:
+                            print(f'\t{buff}')
+                        raise
+                    #print(" # ",curr_stt," <",stt_len,"> ",results[:stt_len])
+                    if stt_len == -1:
                         next_state = self.curr_state = HashableWrapper((results[:stt_len],))
                     else:
                         next_state = self.curr_state = HashableWrapper(results[:stt_len])
@@ -235,19 +248,37 @@ class EnvModel(Model):
                             terminated = result
                 else:
                     next_state, reward, terminated, truncated, info = self.step(action)
-                
-                match learn_method.name:
-                    case "qlearning":
-                        self.q_learning_update(old_state, next_state, action, reward, terminated)
-                    case "sarsa":
-                        self.sarsa_update(old_state, next_state, action, reward, terminated)
-                    case _:
-                        print(f"Unsupported learning method {learn_method}")
+                self.states_buffer.append(f"In State <{old_state}> | Make Action <{action}> | Move to State: {next_state} | Reward {reward} / {terminated}")
+                if len(self.states_buffer) > 5:
+                    self.states_buffer.pop(0)
+                #print(f"In State <{old_state}> | Make Action <{action}> | Move to State: {next_state} | Reward {reward} / {terminated} / {truncated} - {info}")
+                #sleep(0.1)
+                try:
+                    match learn_method.name:
+                        case "qlearning":
+                            self.q_learning_update(old_state, next_state, action, reward, terminated)
+                        case "sarsa":
+                            self.sarsa_update(old_state, next_state, action, reward, terminated)
+                        case _:
+                            print(f"Unsupported learning method {learn_method}")
+                except Exception as e:
+                    print('\n',e)
+                    print(f'# Current State: {curr_stt}, Action: {action_hashed}')
+                    for buff in self.states_buffer:
+                        print(f'\t{buff}')
+                    raise
                 if terminated:
                     done = True
                     self.terminated_states.append(next_state)
                 step += 1
-            
+                
+            self.episode_steps.append(step)
+            if len(self.episode_steps) % 50 == 0:
+                window = self.episode_steps[-50:]
+                self.trend['avg'] = sum(window) / 50
+            #if done and step < max_steps:
+            #    print(f" Episode {i} finished in {step} steps : #{self.curr_state}")
+                
             self.epsilon = max(self.final_epsilon, self.epsilon - self.epsilon_decay)
         
         self.save_learning(f"{self.name}_{learn_method.name}_{learning_rate}_{discount_factor}_{epsilon}_{final_epsilon}_{num_episodes}_{max_steps}.pkl")
@@ -271,7 +302,7 @@ class EnvModel(Model):
             percent = (i + 1) / total
             filled = int(length * percent)
             bar = '█' * filled + '-' * (length - filled)
-            sys.stdout.write(f'\r{prefix}: {i+1}/{total} |{bar}| {percent:.0%}')
+            sys.stdout.write(f'\r{prefix}: {i+1}/{total} avg_steps({self.trend["avg"]:.2f}) |{bar}| {percent:.0%}')
             sys.stdout.flush()
             yield item
         print() 
@@ -332,11 +363,19 @@ class EnvModel(Model):
         
     def get_action(self, state: tuple | HashableWrapper | None = None):
         if state is not None:
+            stt: tuple = tuple()
+            for curr_s, s in zip(self.curr_state.original, state):
+                if s == Any:
+                    stt += (curr_s,)
+                else:
+                    stt += (s,)
+            state = stt    
+            #if not isinstance(state, HashableWrapper):
             state = HashableWrapper(state)
-            #action = monte_carlo_selection(self.q_table[state])
-            #print(f'state: {state} : {self.q_table[state]} > [{action}]{self.actions_list[action]}')
-            #return action
-            return int(np.argmax(self.q_table[state]))
+            action = monte_carlo_selection(self.q_table[state])
+            #print(f'state: {state} : {self.q_table[state]} > [{action}] {self.actions_list[action]}')
+            return action
+            #return int(np.argmax(self.q_table[state]))
         
         if np.random.uniform(0, 1) < self.epsilon:
             return self.action_space.sample()

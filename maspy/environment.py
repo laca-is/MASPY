@@ -117,6 +117,10 @@ def action(act_type: Group, data: Sequence[Any], transition: Callable) -> Callab
                 instance._actions += [Action(act_type,data,transition,self.func)]
             except AttributeError:
                 instance._actions = [Action(act_type,data,transition,self.func)]
+                
+        def __get__(self, obj, objtype = None):
+            return self.func.__get__(obj, objtype)
+        
     return decorator
 
 class EnvironmentMultiton(type):

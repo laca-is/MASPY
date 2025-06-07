@@ -18,7 +18,7 @@ import atexit
 import os
 import sys
 
-MASPY_VERSION = "0.6.4"
+MASPY_VERSION = "2025.06.07"
 
 TAgent = TypeVar('TAgent', bound=Agent)
 TEnv = TypeVar('TEnv', bound=Environment)
@@ -69,7 +69,7 @@ class Admin(metaclass=AdminMeta):
         signal.signal(signal.SIGINT, self.stop_all_agents)
         self.end_of_execution = False
         self._name = f"# {type(self).__name__} #"
-        self.print(f"Starting MASPY Program - {MASPY_VERSION}")
+        self.print(f"Starting MASPY Program - ver.{MASPY_VERSION}")
         self.logger.info(f"Starting MASPY Program - {MASPY_VERSION}", extra={"class_name": "Admin"})
         
         self.show_exec = False
@@ -239,8 +239,8 @@ class Admin(metaclass=AdminMeta):
 
     def start_system(self:'Admin') -> None:
         no_agents = True
-        for model in self._models.values():
-            model.reset_percepts()
+        #for model in self._models.values():
+        #    model.reset_percepts()
                 
         self.start_time = time()
         self.sys_running = True

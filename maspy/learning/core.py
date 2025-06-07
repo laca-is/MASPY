@@ -36,7 +36,7 @@ class HashableWrapper:
         return iter(self.hashable)
     
     def __repr__(self):
-        return f"{self.original}"
+        return f"*{self.original}"
 
 
 class Model(Generic[ObsType, ActType]):
@@ -47,6 +47,7 @@ class Model(Generic[ObsType, ActType]):
     P: dict[HashableWrapper, dict[ActType, list[tuple]]]
     curr_state: HashableWrapper
     last_action: ActType | None
+    states_buffer: list[str]
     
     _np_random: np.random.Generator | None = None
     _np_random_seed: int | None = None
@@ -58,8 +59,14 @@ class Model(Generic[ObsType, ActType]):
         return s, r, t, False, {"prob": p}#, "action_mask": self.action_mask(s)})
 
     def step(self, action: ActType) -> Tuple[HashableWrapper, SupportsFloat, bool, bool, dict[str, Any]]:
-        #print("EV4", self.curr_state, action, self.P)
-        transitions = self.P[self.curr_state][action]
+        try:
+            transitions = self.P[self.curr_state][action]
+            #print(f'\n## Transitions > {self.curr_state} : {action} [{self.P[self.curr_state]}] = {transitions}')
+        except KeyError:
+            print(f'\n## Key Error > {self.curr_state} : {action}')
+            for buff in self.states_buffer:
+                print(buff)
+            raise KeyError
         i = categorical_sample([t[0] for t in transitions], self.np_random)
         p, s, r, t = transitions[i]
         self.curr_state = s
