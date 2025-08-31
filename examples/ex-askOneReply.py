@@ -23,13 +23,6 @@ if __name__ == '__main__':
     ag.add(Belief("value", (1,2,3)))
     ag.add(Belief("value2", (4,5,6)))
     ag.add(Belief("value3", (7,8,9)))
-    
-    # ag1 = Sample("asking")
-    # ag2 = Sample("informant")
-    # ag1.add(Goal("ask","informant"))
-    # ag1.add(Belief("Test1","hello")) 
-    # ag1.add(Belief("Test2",50))
-    # ag2.add(Belief("value",42))
-    #Admin().report = True
     Admin().start_system()
+
     
