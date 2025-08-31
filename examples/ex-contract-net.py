@@ -1,71 +1,89 @@
 from maspy import *
 from random import randint
 
-class Iniciador(Agent):
+class Initiator(Agent):
     def __init__(self, agt_name=None):
         super().__init__(agt_name)
-        self.add(Goal("iniciar"))
+        self.add(Goal("start"))
+        self.idle_counter = -1
 
-    @pl(gain,Goal("iniciar"))
-    def iniciar(self,src):
-        
-        valor_inicial = randint(15,30)
-        self.print(f"Enviando pedido de proposta com valor inicial {valor_inicial} a todos participantes")
-        self.send(broadcast, tell, Belief("pedir_proposta",randint(15,30)))
-        
-    @pl(gain,Belief("recusado"))
-    def recusado(self,src):
-        self.print(f"{src} recusou fazer uma proposta")
+    @pl(gain, Goal("start"))
+    def start(self, src):
+        self.idle_counter = 0
+        value = randint(15,30)
+        self.add(Belief("half_value", value/2))
+        self.print(f"Broadcasting value {value} to all participants")
+        self.send(broadcast, tell, Belief("request_offer", randint(15,30)))
     
-    @pl(gain,Goal("proposta",Any))
-    def proposta(self,src,valor_proposto):
-        if valor_proposto < 10:
-            self.print(f"{src} fez uma proposta com valor {valor_proposto} que foi recusada")
-            self.send(src,tell,Belief("proposta_recusada", valor_proposto))
+    @pl(gain, Goal("offer", Any), Belief("half_value", Any))
+    def offer(self, src, offered_value, half_value):
+        self.idle_counter = 0
+        if offered_value < half_value:
+            self.print(f"{src}'s offer ({offered_value}) refused")
+            self.send(src, tell, Belief("offer_refused", offered_value))
         else:
-            self.print(f"{src} fez uma proposta com valor {valor_proposto} que foi aceita")
-            self.send(src,tell,Belief("proposta_aceita",valor_proposto))
+            self.print(f"{src}'s offer ({offered_value}) accepted")
+            self.send(src, tell, Belief("offer_accepted", offered_value))
     
-    @pl(gain,Belief("negociacao_completa",Any))
-    def negociacao_completa(self,src,valor):
-        self.print(f"{src} aceitou o valor {valor}. Negociacao completa")
+    @pl(gain, Belief("negotiation_complete", Any))
+    def negotiation_complete(self, src, value):
+        self.idle_counter = 0
+        self.print(f"{src} accepted ({value}). Negotiation complete")
     
-    @pl(gain,Belief("negociacao_falha", Any))
-    def negociacao_falha(self,src,valor):
-        self.print(f"{src} aceitou o valor {valor} porém ja negociou com outro")
-    
-class Partiticipante(Agent):
+    @pl(gain, Belief("negotiation_failed", Any))
+    def negotiation_failed(self, src, value):
+        self.idle_counter = 0
+        self.print(f"{src} accepted ({value}) but had already negotiated")
+        
+    def on_idle(self):
+        if self.idle_counter == 500:
+            self.stop_cycle()
+        elif self.idle_counter == -1:
+            pass
+        else:
+            self.idle_counter += 1
+
+class Participant(Agent):
     def __init__(self, agt_name=None):
         super().__init__(agt_name)
-        self.add(Belief("valor_maximo",randint(1,30)))
-        self.add(Belief("Negociando"))
+        self.idle_counter = -1
+        self.best_offer = [500,""]
+        self.add(Belief("max_value", randint(1,30)))
+        self.add(Belief("Negotiating"))
     
-    @pl(gain,Belief("pedir_proposta", Any), [Belief("valor_maximo", Any), Belief("Negociando")])
-    def pedir_proposta(self,src, valor, valor_maximo):
-        if valor > 1.5 * valor_maximo:
-            self.print(f"{src} pediu uma proposta para {valor} mas meu valor maximo eh de {valor_maximo}")
-            self.send(src,tell,Belief("recusado"))
+    @pl(gain, Belief("request_offer", Any), [Belief("max_value", Any), Belief("Negotiating")])
+    def request_offer(self, src, value, max_value):
+        self.idle_counter = 0
+        if value > 1.5 * max_value:
+            self.print(f"Refusing {src}'s value ({value}) > {max_value}")
         else:
-            valor_proposto = randint(10, valor-5)
-            self.print(f"{src} pediu uma proposta para {valor}, fazendo proposta para {valor_proposto}")
-            self.send(src,achieve,Goal("proposta",valor_proposto))
+            offered_value = randint(10, value-5)
+            self.print(f"Offering ({offered_value}) for {src}'s {value}")
+            self.send(src, achieve, Goal("offer", offered_value))
     
-    @pl(gain,Belief("proposta_recusada", Any))
-    def proposta_recusada(self,src, valor):
-        self.print(f"{src} recusou a proposta de {valor}")
+    @pl(gain, Belief("offer_accepted", Any))
+    def offer_accepted(self, src, value):
+        self.idle_counter = 0
+        if value < self.best_offer[0]:
+            self.print(f"Received good value {value} from {src} < {self.best_offer}")
+            self.best_offer = [value, src]
+        else:
+            self.print(f"Already accepted better value {value} > {self.best_offer}")
     
-    @pl(gain,Belief("proposta_aceita", Any), Belief("Negociando"))
-    def proposta_aceita_1(self,src, valor):
-        self.print(f"{src} aceitou a proposta de {valor}, finalizando negociacao")
-        self.rm(Belief("Negociando"))
-        self.send(src,tell,Belief("negociacao_completa",valor))
+    @pl(gain, Belief("offer_refused", Any))
+    def offer_refused(self, src, value):
+        self.idle_counter = 0
+        self.print(f"{src} rejected offer of {value}")
     
-    @pl(gain,Belief("proposta_aceita", Any), ~Belief("Negociando"))
-    def proposta_aceita_2(self,src, valor):
-        self.print(f"{src} aceitou a proposta de {valor}, porem ja negociei com outro iniciador")
-        self.send(src,tell,Belief("negociacao_falha",valor))
+    def on_idle(self):
+        if self.idle_counter == 500:
+            self.stop_cycle()
+        elif self.idle_counter == -1:
+            pass
+        else:
+            self.idle_counter += 1
 
 if __name__ == "__main__":
-    [Iniciador() for _ in range(3)]
-    [Partiticipante() for _ in range(5)] 
+    [Initiator() for _ in range(5)]
+    [Participant() for _ in range(15)] 
     Admin().start_system()
