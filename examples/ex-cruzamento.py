@@ -12,7 +12,7 @@ class Cruzamento(Environment):
     def cruzar(self, src):
         self.print(f"agente {src} cruzou")
     
-    def aguardar(self, src):
+    def esperar(self, src):
         self.print(f"agente {src} aguardando")
         self.change(Percept("cruzamento"),"livre")
 
@@ -30,7 +30,7 @@ class VA(Agent):
     @pl(gain, Goal("aguardar"), Belief("no_cruzamento"))
     def aguardar(self, src):
         self.print("Aguardando")
-        self.aguardar()
+        self.esperar()
         self.send("CT",achieve,Goal("verificar_cruzamento"))
         
 class CT(Agent):
@@ -57,3 +57,4 @@ if __name__=="__main__":
     
     
         
+
