@@ -28,26 +28,6 @@ To update your already installed version of MASPY to the latest one, you can use
 
 **MASPY needs `Python` 3.12+ to run correctly.**
 
-## Latest changes
-	maspy-v0.2.3:
-	- Properly addition of Intention Mechanisms
- 	- Updated usage of environment plans
-
-	maspy-v0.2.2:
- 	- Removed Numpy necessity
-  
-	maspy-v0.2.1:
-	- New internal function to perceive environments during plans
-	- Fixed problem of overwriting perceived beliefs of the environment
-	- Better error explanations for debugging
-	- More concise system logging
- 
-	maspy-v0.2.0:
-	- Better typing for functions
-	- Fixed perception speed
-	- Fixed ending multiple agents problem
-	- Better agent finder
- 
 ## Using MASPY
 
 ### Import
