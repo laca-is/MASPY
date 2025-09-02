@@ -1,4 +1,4 @@
-from threading import Lock, Event
+from threading import Lock
 from typing import Dict, Set, List, TYPE_CHECKING, Union, Optional, Any, Sequence, Callable
 from dataclasses import dataclass, field
 from collections.abc import Iterable
@@ -69,9 +69,10 @@ class Percept:
 
     def __str__(self) -> str:
         if self.group == DEFAULT_GROUP:
-            return f"Percept{self.key,self._args,self.source}"
+            s = f"Percept{self.key,self._args,self.source}"
         else:
-            return f"Percept{self.key,self._args,self.group,self.source}"
+            s = f"Percept{self.key,self._args,self.group,self.source}"
+        return s.replace("typing.Any","Any")
     
     def __repr__(self):
         return self.__str__()

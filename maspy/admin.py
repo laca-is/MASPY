@@ -16,9 +16,10 @@ from time import sleep, time
 from pathlib import Path
 import atexit
 import os
-import sys
+import sys 
+import keyboard # type: ignore
 
-MASPY_VERSION = "2025.06.07"
+MASPY_VERSION = "2025.09.02"
 
 TAgent = TypeVar('TAgent', bound=Agent)
 TEnv = TypeVar('TEnv', bound=Environment)
@@ -62,16 +63,20 @@ class AdminMeta(type):
         return cls._instances[cls]
     
 class Admin(metaclass=AdminMeta):    
-    def __init__(self:'Admin', start_logger = False) -> None:
+    def __init__(self:'Admin', log=False) -> None:
         self.logger = logging.getLogger("maspy")
-        self.logging = start_logger
-        setup_logging() if start_logger else ...
+        self.sys_settings()
         signal.signal(signal.SIGINT, self.stop_all_agents)
+        keyboard.add_hotkey("ctrl+space", self.pause_system)
+        keyboard.add_hotkey("shift+-", self.slower_cycle)
+        keyboard.add_hotkey("shift+=", self.faster_cycle)
+        self.logging = False
         self.end_of_execution = False
         self._name = f"# {type(self).__name__} #"
         self.print(f"Starting MASPY Program - ver.{MASPY_VERSION}")
-        self.logger.info(f"Starting MASPY Program - {MASPY_VERSION}", extra={"class_name": "Admin"})
-        
+        if log:
+            self.start_logger()
+        self.permit_print = True
         self.show_exec = False
         self.agt_sh_exec = False
         self.agt_sh_cycle = False
@@ -100,6 +105,17 @@ class Admin(metaclass=AdminMeta):
         self.start_time: float|None = None
         self.system_info: Dict[str, Any] = dict()
     
+    def start_logger(self):
+        if self.logging:
+            return
+        self.logging = True
+        setup_logging()
+        self.logger.info(f"Starting MASPY Logging - {MASPY_VERSION}", extra={"class_name": "Admin"})
+        
+    def sys_settings(self, recording=False, print_running=False, cycle_speed=1):
+        self.recording = recording
+        self.number_running = print_running
+        self.cycle_speed = cycle_speed
 
     def reset_instance(self, *args, **kwargs):
         for env in self._environments.values():
@@ -127,11 +143,6 @@ class Admin(metaclass=AdminMeta):
     
     def _add_agent(self, agent: Agent) -> None:
         name: Optional[str | tuple] = agent.my_name
-        # if agent.tuple_name == ("",0) :
-        #     name = type(agent).__name__
-        # else:
-        #     name = agent.tuple_name[0]
-            
         assert isinstance(name,str), f"Agent name must be a string, got {type(name)}"
         if name in self._num_agent:
             self._agents[(name,1)].unique = False
@@ -149,6 +160,7 @@ class Admin(metaclass=AdminMeta):
         
         self._agent_list[agent.tuple_name] = type(agent).__name__
         self._agents[agent.tuple_name] = agent
+        agent.printing = self.permit_print
         agent.show_exec = self.agt_sh_exec
         agent.show_cycle = self.agt_sh_cycle
         agent.show_prct = self.agt_sh_prct
@@ -186,6 +198,7 @@ class Admin(metaclass=AdminMeta):
 
     def _add_channel(self, channel: Channel) -> None:
         self._channels[channel.my_name] = channel
+        channel.printing = self.permit_print
         channel.show_exec = self.ch_sh_exec
         channel.tcolor = bcolors.get_color("Channel")
         self.print(
@@ -200,6 +213,7 @@ class Admin(metaclass=AdminMeta):
 
     def _add_environment(self, environment: Environment) -> None:
         self._environments[environment.my_name] = environment
+        environment.printing = self.permit_print
         environment.show_exec = self.env_sh_exec
         environment.tcolor = bcolors.get_color("Env")
         self.print(
@@ -213,22 +227,21 @@ class Admin(metaclass=AdminMeta):
         else:
             current_time = (time() - self.start_time)*1000
         current_time = round(current_time,2)
-        self.print("### RECORDING CURRENT INFO ###")
-        self.system_info[current_time] = {"agent":{},"Environment":{},"Communication":{}}
+        self.system_info[current_time] = {"Agent":{},"Environment":{},"Communication":{}}
         
         agent_info = dict()
         for agent in self._agents.values():
-            agent_info.update({agent.my_name: agent.get_info})
+            agent_info.update({agent.my_name: agent.agent_info})
         
         env_info = dict()
         for env_name, env in self._environments.items():
-            env_info.update({env_name: env.get_info})
+            env_info.update({env_name: env.env_info})
             
         ch_info = dict()    
         for ch_name, ch in self._channels.items():
-            ch_info.update({ch_name: ch.get_info})
+            ch_info.update({ch_name: ch.ch_info})
                
-        self.system_info[current_time]["agent"].update(agent_info)
+        self.system_info[current_time]["Agent"].update(agent_info)
         self.system_info[current_time]["Environment"].update(env_info)
         self.system_info[current_time]["Communication"].update(ch_info)
     
@@ -237,41 +250,46 @@ class Admin(metaclass=AdminMeta):
             return 0.000000
         return round(time() - self.start_time,6)
 
-    def start_system(self:'Admin') -> None:
+    def start_system(self:'Admin', end_if_idle: int | bool = False) -> None:
         no_agents = True
         #for model in self._models.values():
         #    model.reset_percepts()
                 
         self.start_time = time()
-        self.sys_running = True
         if self.recording:
             self.record_info()
             
         try:
-            self.print("Starting Agents")
-            for agent_name in self._agents:
+            if not self._started_agents:
+                self.print("Starting All Agents")
+                for agent_name in self._agents:
+                    no_agents = False
+                    self._start_agent(agent_name)
+            elif self._agents:
                 no_agents = False
-                self._start_agent(agent_name)
-            
+                
             if no_agents:
-                self.print("No agents are connected")
+                self.print("No Agents Created, Can't Start System")
+                return
+            self.sys_running = True
             self.start_event.set()
             self.print("Starting System")
             sleep(1)
             while self.running_agents():
                 if self.recording:
-                    sleep(self.record_rate)
+                    #sleep(self.record_rate)
                     self.record_info()
-                sleep(1)
+                if self.number_running:
+                    self.print_running_number()
+                sleep(self.cycle_speed)
             
             self.stop_all_agents()
             self.sys_running = False
             self.logger.info("MASPY Program Ended", extra={"class_name": "Admin"})
-            return
         except Exception as e:
             self.print(e)
             pass
-    
+
     def running_class_agents(self, cls) -> bool:
         for agent in self._agents.values():
             if agent.tuple_name[0] == cls and agent.running:
@@ -283,6 +301,13 @@ class Admin(metaclass=AdminMeta):
             if agent.running:
                 return True
         return False
+    
+    def print_running_number(self:'Admin') -> None:
+        count = 0
+        for agent in self._agents.values():
+            if agent.running:
+                count += 1
+        self.print(f"Still Running: {count}")
 
     def print_running(self:'Admin', cls=None) -> bool:
         buffer = "Still running agent(s):\n"
@@ -300,28 +325,59 @@ class Admin(metaclass=AdminMeta):
         self, agents: Union[List[TAgent], TAgent]
     ) -> None:
         if isinstance(agents, list):
-            self.print("Starting listed agents")
+            self.print("Starting Listed Agents")
             for agent in agents:
                 assert isinstance(agent.tuple_name, tuple)
                 self._start_agent(agent.tuple_name)
         else:
             assert isinstance(agents, Agent)
-            self.print(f"Starting agent {type(agents).__name__}:{agents.tuple_name}")
+            self.print(f"Starting Agent {type(agents).__name__}:{agents.tuple_name}")
             assert isinstance(agents.tuple_name, tuple)
             self._start_agent(agents.tuple_name)
 
     def _start_agent(self, agent_name: tuple) -> None:
         try:
             if agent_name in self._started_agents:
-                self.print(f"'Agent' {agent_name} already started")
+                self.print(f"Agent {agent_name} already started")
                 return
 
             agent = self._agents[agent_name]
             self._started_agents.append(agent)
             agent.reasoning(self.start_event)
         except KeyError:
-            self.print(f"'Agent' {agent_name} not connected to environment")
+            self.print(f"'Agent' {agent_name} not connected")
             
+    def pause_system(self):
+        if self.start_event.is_set():
+            self.print("Pausing All Agents")
+            self.start_event.clear()
+            for agent in self._agents.values():
+                agent.paused_agent = True
+        else:
+            self.print("Unpausing All Agents")
+            self.start_event.set()
+            for agent in self._agents.values():
+                agent.paused_agent = False
+                
+    def stop_agents(self, agents: Union[List[TAgent], TAgent]) -> None:
+        if isinstance(agents, list):
+            self.print("Stopping Listed Agents")
+            for agent in agents:
+                assert isinstance(agent.tuple_name, tuple)
+                self._stop_agent(agent.tuple_name)
+        else:
+            assert isinstance(agents, Agent)
+            self.print(f"Stopping Agent {type(agents).__name__}:{agents.tuple_name}")
+            assert isinstance(agents.tuple_name, tuple)
+            self._stop_agent(agents.tuple_name) 
+    
+    def _stop_agent(self, agent_name: tuple) -> None:
+        try:
+            agent = self._agents[agent_name]
+            agent.stop_cycle()
+        except KeyError:
+            self.print(f"'Agent' {agent_name} not connected")
+      
     def stop_all_agents(self,sig=None,frame=None):
         self.logger.info("Ending MASPY Program", extra={"class_name": "Admin"})
         if self._report_lock:
@@ -329,7 +385,7 @@ class Admin(metaclass=AdminMeta):
         self._report_lock = True
         
         self.elapsed_time = time() - self.start_time
-        self.print("[Closing System]")
+        self.print("Closing System")
         self.print_running()
         for agent in self._agents.values():
             if agent.running:
@@ -475,7 +531,7 @@ class Admin(metaclass=AdminMeta):
             for target in targets:
                 agent.connect_to(target)
 
-    def set_logging(self, show_exec: bool, show_cycle: bool=False,
+    def console_settings(self, show_exec: bool, show_cycle: bool=False,
                     show_prct: bool=False, show_slct: bool=False, 
                      set_admin=True,
                      set_agents=True,
@@ -501,7 +557,7 @@ class Admin(metaclass=AdminMeta):
             ch.show_exec = self.env_sh_exec
     
     def block_prints(self):
-        self.printing = False
+        self.permit_print = False
         for agent in self._agents.values():
             agent.printing = False
         for env in self._environments.values():
@@ -509,6 +565,22 @@ class Admin(metaclass=AdminMeta):
         for ch in self._channels.values():
             ch.printing = False
 
+    def slower_cycle(self) -> None:
+        print_flag = True
+        for agent in self._agents.values():
+            if print_flag:
+                self.print(f"Increasing delay from {agent.delay} to {agent.delay + 1}")
+                print_flag = False
+            agent.delay += 1
+    
+    def faster_cycle(self) -> None:
+        print_flag = True
+        for agent in self._agents.values():
+            if print_flag:
+                self.print(f"Decreasing delay from {agent.delay} to {max(agent.delay - 1, 0)}")
+                print_flag = False
+            agent.delay = max(agent.delay - 1, 0)
+    
     def slow_cycle_by(self, time: int | float) -> None:
         for agent in self._agents.values():
             agent.delay = time

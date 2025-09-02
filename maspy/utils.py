@@ -66,41 +66,45 @@ class bcolors(bcolorsMeta):
         return color
 
 class Condition:
-    def __init__(self, c_type: str, left_value: Condition | Belief | Goal, right_value: Condition | Belief | Goal | None = None, func: Optional[Callable] = None) -> None:
+    def __init__(self, c_type: str, str_type: str, left_value: Condition | Belief | Goal, right_value: Condition | Belief | Goal | None = None, func: Optional[Callable] = None) -> None:
         self.c_type = c_type
+        self.str_type = str_type
         self.func = func
         self.left_value = left_value
         self.right_value = right_value
     
     def __invert__(self):
-        return Condition("~", self)
+        return Condition("~", "~", self)
     
     def __and__(self, other):
-        return Condition("op", self, other, lambda x,y: x & y)
+        return Condition("op", "&",self, other, lambda x,y: x & y)
         
     def __or__(self, other):
-        return Condition("op", self, other, lambda x,y: x | y)
+        return Condition("op", "|", self, other, lambda x,y: x | y)
     
-    def __xor__(self, other):    
-        return Condition("op", self, other, lambda x,y: x ^ y)
+    def __xor__(self, other):
+        return Condition("op", "^", self, other, lambda x,y: x ^ y)
     
     def __lt__(self, other):
-        return Condition("comp", self,other, lambda x,y: x < y)
+        return Condition("comp", "<", self,other, lambda x,y: x < y)
     
     def __le__(self, other):
-        return Condition("comp", self,other, lambda x,y: x <= y)
+        return Condition("comp", "<=", self,other, lambda x,y: x <= y)
     
     def __gt__(self, other):
-        return Condition("comp", self,other, lambda x,y: x > y)
+        return Condition("comp", ">", self,other, lambda x,y: x > y)
     
     def __ge__(self, other):
-        return Condition("comp", self,other, lambda x,y: x >= y)
+        return Condition("comp", ">=", self,other, lambda x,y: x >= y)
     
     def __ne__(self, value):
-        return Condition("comp", self,value, lambda x,y: x != y)
+        return Condition("comp", "!=", self,value, lambda x,y: x != y)
     
     def __str__(self) -> str:
-        return f'{self.c_type}[{self.left_value}, {self.right_value}]'
+        if self.right_value is None:
+            return f'{self.str_type}{self.left_value}'
+        else:
+            return f'({self.left_value} {self.str_type} {self.right_value})'
     
     def __repr__(self):
         return self.__str__()
