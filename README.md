@@ -36,6 +36,8 @@ To use the Framework you need this simple import  ```from maspy import *``` , no
 
 Everything for ``MASPY`` to run correctly in imported this way.
 
+Every internal Function is explained in our [WIKI](https://github.com/laca-is/MASPY/wiki)
+
 ## Rough edges
 The project still has some rough edges that should be considered. 
 
@@ -47,4 +49,6 @@ with over thousands of agents was possible.
 
 ## Papers published
 
+MASPY: A Python-Based Framework for Developing BDI Multi-Agent Systems, PAAMS, 2025
+Towards the Integration of Reinforcement Learning into MASPY, WESAAC 2025
 MASPY: Towards the Creation of BDI Multi-Agent Systems, WESAAC 2023
