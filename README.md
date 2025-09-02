@@ -49,6 +49,6 @@ with over thousands of agents was possible.
 
 ## Papers published
 
-MASPY: A Python-Based Framework for Developing BDI Multi-Agent Systems, PAAMS, 2025
-Towards the Integration of Reinforcement Learning into MASPY, WESAAC 2025
-MASPY: Towards the Creation of BDI Multi-Agent Systems, WESAAC 2023
+- MASPY: A Python-Based Framework for Developing BDI Multi-Agent Systems, PAAMS, 2025
+- Towards the Integration of Reinforcement Learning into MASPY, WESAAC 2025
+- MASPY: Towards the Creation of BDI Multi-Agent Systems, WESAAC 2023
