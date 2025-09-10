@@ -15,11 +15,12 @@ class SimpleAgent(Agent):
         self.env_act(src)
 
 if __name__ == "__main__":
-    Admin().set_logging(show_exec=True)
+    Admin().console_settings(show_exec=True)
     agent1 = SimpleAgent()
     agent2 = SimpleAgent()
     env = SimpleEnv()
     ch = Channel("SimpleChannel")
     Admin().connect_to([agent1,agent2],[env,ch])
     agent1.add(Goal("say_hello",(agent2.my_name,)))
+
     Admin().start_system()
