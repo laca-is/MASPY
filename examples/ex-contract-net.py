@@ -34,14 +34,6 @@ class Initiator(Agent):
     def negotiation_failed(self, src, value):
         self.idle_counter = 0
         self.print(f"{src} accepted ({value}) but had already negotiated")
-        
-    def on_idle(self):
-        if self.idle_counter == 500:
-            self.stop_cycle()
-        elif self.idle_counter == -1:
-            pass
-        else:
-            self.idle_counter += 1
 
 class Participant(Agent):
     def __init__(self, agt_name=None):
@@ -74,16 +66,9 @@ class Participant(Agent):
     def offer_refused(self, src, value):
         self.idle_counter = 0
         self.print(f"{src} rejected offer of {value}")
-    
-    def on_idle(self):
-        if self.idle_counter == 500:
-            self.stop_cycle()
-        elif self.idle_counter == -1:
-            pass
-        else:
-            self.idle_counter += 1
 
 if __name__ == "__main__":
     [Initiator() for _ in range(5)]
     [Participant() for _ in range(15)] 
     Admin().start_system()
+
