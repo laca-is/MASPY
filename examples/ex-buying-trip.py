@@ -119,14 +119,24 @@ class Buyer(Agent):
         self.stop_cycle()
       
 if __name__ == "__main__":
-    ws = Website()
-    agent_list: list = [Seller() for _ in range(1)]
+    num_sellers = 100
+    num_buyers = 500
     
-    for _ in range(3):
-        stops = randint(0,6)
-        buyer = Buyer("Buyer", randint(0,6), randint(int(700/(stops+1)),1000))
+    min_stops = 0
+    max_stops = 6
+    min_price = 700
+    max_price = 1000
+    
+    ws = Website()
+    agent_list: list = [Seller() for _ in range(num_sellers)]
+    
+    for _ in range(num_buyers):
+        stops_pref = randint(min_stops, max_stops)
+        price_pref = randint(int(min_price/(stops_pref+1)),max_price)
+        
+        buyer = Buyer("Buyer", stops_pref, price_pref)
         agent_list.append(buyer)
     
     Admin().connect_to(agent_list,ws)
-
     Admin().start_system()
+
