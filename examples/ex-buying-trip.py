@@ -10,7 +10,8 @@ class Website(Environment):
     
     def delist_trip(self, agt, trip):
         self.print(f"Trip delisted by {agt}: {trip['attributes']}")
-        self.delete(Percept("trip",trip))
+        trip_perc = self.get(Percept("trip",trip))
+        self.delete(trip_perc)
 
 class Seller(Agent):    
     def __init__(self, agt_name=None):
@@ -127,4 +128,5 @@ if __name__ == "__main__":
         agent_list.append(buyer)
     
     Admin().connect_to(agent_list,ws)
+
     Admin().start_system()
