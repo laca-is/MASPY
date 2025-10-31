@@ -53,6 +53,11 @@ class Seller(Agent):
         new_trip = {"seller":self.my_name,"attributes":new_trip}
         self.send(src,achieve,Goal("check",new_trip))
     
+    def on_idle(self):
+        if not Admin().running_class_agents("Buyer"):
+            self.print("No buyers left, stopping")
+            self.stop_cycle()
+    
 class Buyer(Agent):
     def __init__(self, agt_name, max_stops, max_price):
         super().__init__(agt_name)
@@ -119,8 +124,8 @@ class Buyer(Agent):
         self.stop_cycle()
       
 if __name__ == "__main__":
-    num_sellers = 100
-    num_buyers = 500
+    num_sellers = 5
+    num_buyers = 10
     
     min_stops = 0
     max_stops = 6
@@ -139,4 +144,3 @@ if __name__ == "__main__":
     
     Admin().connect_to(agent_list,ws)
     Admin().start_system()
-
