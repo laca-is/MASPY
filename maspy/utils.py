@@ -1,6 +1,8 @@
 from __future__ import annotations
 from typing import Any, Callable, Optional, TYPE_CHECKING
 from threading import Lock
+import re
+import ast
 
 if TYPE_CHECKING:
     from maspy.agent import Belief, Goal
@@ -108,6 +110,17 @@ class Condition:
     
     def __repr__(self):
         return self.__str__()
+
+def fill_anys(template: str, values_str: str) -> str:
+    values = ast.literal_eval(values_str)
+    flat_values = [v for tup in values for v in (tup if isinstance(tup, (tuple, list)) else (tup,))]
+    
+    def replacer(_):
+        nonlocal flat_values
+        val = flat_values.pop(0)
+        return repr(val) 
+
+    return re.sub(r"\bAny\b", replacer, template)
 
 def merge_dicts(dict1: dict[Any, dict[Any, set[Any]]] | None, dict2: dict[Any, dict[Any, set[Any]]] | None) -> dict | None:
     if dict1 is None or dict2 is None:

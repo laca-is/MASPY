@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Sequence, Optional
 from collections import defaultdict
 from maspy.learning.core import Model, HashableWrapper
 from maspy.learning.space import Discrete
@@ -10,6 +10,7 @@ import pickle
 import sys
 
 if TYPE_CHECKING:
+    from maspy.agent import Agent
     from maspy.environment import Environment, Action
 
 Learn_Method = Enum('qlearning | sarsa', ['qlearning', 'sarsa']) # type: ignore[misc]
@@ -26,10 +27,10 @@ cartesian = Group.cartesian
 listed = Group.listed
 
 class EnvModel(Model):
-    def __init__(self, env: 'Environment') -> None:
+    def __init__(self, env: 'Environment', agent: Optional['Agent'] = None) -> None:
         super().__init__()
-        print(f'Creating model for {env.my_name}')
-        self.name = env.my_name
+        self.name = f'Model_{env.my_name}' if agent is None else f'Model_{agent.my_name}_{env.my_name}'
+        print(f'Creating {self.name}')
         self.env = env
         states = env._states.copy()
         actions = env._actions.copy()
@@ -76,7 +77,9 @@ class EnvModel(Model):
                 raise TypeError(f'Error: possible_starts must be a {dict} when not "off-policy", got {env.possible_starts} instead')
         else:
             self.make_policy_table(env, states)
-        
+            
+        #print("initial_state_distrib:", self.initial_state_distrib)
+        #print("len:", len(self.initial_state_distrib))
         self.curr_state = self.initial_state_distrib[np.random.randint(0, len(self.initial_state_distrib))]     
         self.action_space = Discrete(len(self.actions_list))
         self.observation_space = Discrete(len(self.states_list))
@@ -143,9 +146,9 @@ class EnvModel(Model):
         assert isinstance(env.possible_starts, dict), "possible_starts must be a dict when not off-policy"
         start_list = list(env.possible_starts.values())
         for percept in env._state_percepts.values():
-            if percept.key not in env.possible_starts:
-                start_list.append(env._states[percept.key])
-                env.possible_starts[percept.key] = env._states[percept.key]
+            if percept.name not in env.possible_starts:
+                start_list.append(env._states[percept.name])
+                env.possible_starts[percept.name] = env._states[percept.name]
         normalized = [ 
             [item] if not isinstance(item, list | tuple | set) 
             else list(item) for item in start_list
@@ -189,7 +192,6 @@ class EnvModel(Model):
         self.P[state][action_idx].append((probability, new_state, reward, terminated))
         
     def learn(self, learn_method: Learn_Method, learning_rate: float = 0.05, discount_factor: float = 0.8, epsilon: float = 1, final_epsilon: float = 0.1, max_steps: int | None = None, num_episodes: int = 10000, load_learning: bool = False):   
-        
         self.learning_rate = learning_rate
         self.learning_rate_policy = 0.01
         self.discount_factor = discount_factor
@@ -210,7 +212,6 @@ class EnvModel(Model):
             self.policy_table: dict = defaultdict(lambda: np.full(self.num_actions, 1 / self.num_actions))
             
         self.states_buffer = []
-        self.reset_percepts()
         for i in self.progress_bar(range(1, num_episodes+1), "Training"):
             self.reset()
             done = False
@@ -280,8 +281,8 @@ class EnvModel(Model):
             #    print(f" Episode {i} finished in {step} steps : #{self.curr_state}")
                 
             self.epsilon = max(self.final_epsilon, self.epsilon - self.epsilon_decay)
-        
-        self.save_learning(f"{self.name}_{learn_method.name}_{learning_rate}_{discount_factor}_{epsilon}_{final_epsilon}_{num_episodes}_{max_steps}.pkl")
+        self.reset_percepts()
+        #self.save_learning(f"{self.name}_{learn_method.name}_{learning_rate}_{discount_factor}_{epsilon}_{final_epsilon}_{num_episodes}_{max_steps}.pkl")
 
     def save_learning(self, filename: str):
         with open(filename, 'wb') as file:

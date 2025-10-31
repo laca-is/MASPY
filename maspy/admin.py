@@ -16,35 +16,72 @@ from time import sleep, time
 from pathlib import Path
 import atexit
 import os
-import sys 
-import keyboard # type: ignore
+import sys, queue
 
-MASPY_VERSION = "2025.09.02"
+# CHANGE TIMESTAMP to SYSTEMTIME 
+
+MASPY_VERSION = "2025.10.31"
 
 TAgent = TypeVar('TAgent', bound=Agent)
 TEnv = TypeVar('TEnv', bound=Environment)
 TChannel = TypeVar('TChannel', bound=Channel)
 
-def setup_logging():
+stderr = {"stderr": {
+            "class": "logging.StreamHandler",
+            "level": "DEBUG",
+            "formatter": "simple",
+            "stream": "ext://sys.stderr"
+        }}
+
+file_json = {"file_json": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "level": "DEBUG",
+            "formatter": "simple_json",
+            "filename": "logs/maspy.log.jsonl"
+        }}
+
+listener = {"listener": {
+            "class": "maspy.logger.QueueListener",
+            "level": "DEBUG",
+            "formatter": "simple_json" 
+        }}
+
+def setup_logging(
+        enable_console: bool = False,
+        enable_file: bool = False,
+        enable_listener: bool = False
+    ):
     config_file = Path(f"{os.path.dirname(__file__)}/logger_config.json")
     with open(config_file) as f:
         config = json.load(f)
-        
-    if not os.path.exists("logs"):
-        os.makedirs("logs")
-        
-    main_name = os.path.basename(sys.argv[0]).split(".py")[0]
-    counter = 1
-    filename = f"{main_name}_{counter}"
-    while os.path.exists(f"logs/{filename}.log.jsonl"):
-        counter += 1
+
+    if enable_file:
+        config["handlers"].update(file_json)
+        config["handlers"]["queue_handler"]["handlers"].append("file_json")
+        if not os.path.exists("logs"):
+            os.makedirs("logs")
+
+        main_name = os.path.basename(sys.argv[0]).split(".py")[0]
+        counter = 1
         filename = f"{main_name}_{counter}"
-    config["handlers"]["file_json"]["filename"] = f"logs/{filename}.log.jsonl"
-            
+        while os.path.exists(f"logs/{filename}.log.jsonl"):
+            counter += 1
+            filename = f"{main_name}_{counter}"
+        config["handlers"]["file_json"]["filename"] = f"logs/{filename}.log.jsonl"
+    
+    if enable_console:
+        config["handlers"].update(stderr)
+        config["handlers"]["queue_handler"]["handlers"].append("stderr")
+    
+    if enable_listener:
+        config["handlers"].update(listener)
+        config["handlers"]["queue_handler"]["handlers"].append("listener")
+
     logging.config.dictConfig(config)
     queue_handler = logging.getHandlerByName("queue_handler")
     if queue_handler is not None:
         assert(isinstance(queue_handler, logging.handlers.QueueHandler))
+        assert queue_handler.listener is not None
         queue_handler.listener.start()
         atexit.register(queue_handler.listener.stop)
 
@@ -63,19 +100,20 @@ class AdminMeta(type):
         return cls._instances[cls]
     
 class Admin(metaclass=AdminMeta):    
-    def __init__(self:'Admin', log=False) -> None:
+    def __init__(self:'Admin', all_log= False, console_log=False, file_log=False, listener_log=False) -> None:
+        self.print_queue: queue.Queue = queue.Queue()
         self.logger = logging.getLogger("maspy")
         self.sys_settings()
         signal.signal(signal.SIGINT, self.stop_all_agents)
-        keyboard.add_hotkey("ctrl+space", self.pause_system)
-        keyboard.add_hotkey("shift+-", self.slower_cycle)
-        keyboard.add_hotkey("shift+=", self.faster_cycle)
         self.logging = False
         self.end_of_execution = False
         self._name = f"# {type(self).__name__} #"
         self.print(f"Starting MASPY Program - ver.{MASPY_VERSION}")
-        if log:
-            self.start_logger()
+        if all_log:
+            self.start_logger(True,True,True)
+        elif console_log or file_log or listener_log:
+            self.start_logger(console_log, file_log, listener_log)
+        
         self.permit_print = True
         self.show_exec = False
         self.agt_sh_exec = False
@@ -105,18 +143,40 @@ class Admin(metaclass=AdminMeta):
         self.start_time: float|None = None
         self.system_info: Dict[str, Any] = dict()
     
-    def start_logger(self):
+    def start_logger(self, enable_console, enable_file, enable_listener):
         if self.logging:
             return
         self.logging = True
-        setup_logging()
-        self.logger.info(f"Starting MASPY Logging - {MASPY_VERSION}", extra={"class_name": "Admin"})
+        setup_logging(enable_console, enable_file, enable_listener)
+        self.logger.info(f"Starting MASPY Logging - {MASPY_VERSION}", extra={"class_name": "Admin", "my_name": ""})
         
     def sys_settings(self, recording=False, print_running=False, cycle_speed=1):
         self.recording = recording
         self.number_running = print_running
         self.cycle_speed = cycle_speed
 
+    def print_buffer(self):
+        buffer = []
+        while True:
+            try:
+                msg = self.print_queue.get(timeout=0.1)
+                if msg is None:
+                    if buffer:
+                        sys.stdout.write("\n".join(buffer) + "\n")
+                        sys.stdout.flush()
+                        buffer.clear()
+                    break
+                buffer.append(msg)
+                if len(buffer) >= 1000: 
+                    sys.stdout.write("\n".join(buffer) + "\n")
+                    sys.stdout.flush()
+                    buffer.clear()
+            except queue.Empty:
+                if buffer:
+                    sys.stdout.write("\n".join(buffer) + "\n")
+                    sys.stdout.flush()
+                    buffer.clear()
+    
     def reset_instance(self, *args, **kwargs):
         for env in self._environments.values():
             type(env)._instances.pop(env.my_name)
@@ -127,7 +187,7 @@ class Admin(metaclass=AdminMeta):
     def print(self,*args, **kwargs):
         f_args = "".join(map(str, args))
         f_kwargs = "".join(f"{key}={value}" for key, value in kwargs.items())
-        return print(f"{bcolors.GOLD}{self._name}> {f_args}{f_kwargs}{bcolors.ENDCOLOR}")
+        self.print_queue.put(f"{bcolors.GOLD}{self._name}> {f_args}{f_kwargs}{bcolors.ENDCOLOR}")
     
     def get_agents(self) -> Dict[tuple, str]:
         return self._agent_list
@@ -219,7 +279,7 @@ class Admin(metaclass=AdminMeta):
         self.print(
             f"Registering Environment {type(environment).__name__}:{environment.my_name}"
         ) if self.show_exec else ...
-    
+
     def record_info(self):
         if self.start_time is None:
             self.start_time = time()
@@ -254,7 +314,9 @@ class Admin(metaclass=AdminMeta):
         no_agents = True
         #for model in self._models.values():
         #    model.reset_percepts()
-                
+        pb_thread = Thread(target=self.print_buffer, daemon=True)
+        pb_thread.start()
+        
         self.start_time = time()
         if self.recording:
             self.record_info()
@@ -285,7 +347,9 @@ class Admin(metaclass=AdminMeta):
             
             self.stop_all_agents()
             self.sys_running = False
-            self.logger.info("MASPY Program Ended", extra={"class_name": "Admin"})
+            self.print_queue.put(None)   # send stop signal
+            pb_thread.join()
+            self.logger.info("MASPY Program Ended", extra={"class_name": "Admin", "my_name": ""})
         except Exception as e:
             self.print(e)
             pass
@@ -343,7 +407,7 @@ class Admin(metaclass=AdminMeta):
 
             agent = self._agents[agent_name]
             self._started_agents.append(agent)
-            agent.reasoning(self.start_event)
+            agent.start_cycle(self.start_event)
         except KeyError:
             self.print(f"'Agent' {agent_name} not connected")
             
@@ -379,7 +443,7 @@ class Admin(metaclass=AdminMeta):
             self.print(f"'Agent' {agent_name} not connected")
       
     def stop_all_agents(self,sig=None,frame=None):
-        self.logger.info("Ending MASPY Program", extra={"class_name": "Admin"})
+        self.logger.info("Ending MASPY Program", extra={"class_name": "Admin", "my_name": ""})
         if self._report_lock:
             return
         self._report_lock = True

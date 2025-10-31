@@ -18,7 +18,7 @@
             "fmt_keys":{
                 "level": "levelname",
                 "desc": "desc",
-                "timestamp": "timestamp",
+                "system_time": "system_time",
                 "logger": "name",
                 "function": "funcName",
                 "line": "lineno",
@@ -27,23 +27,9 @@
         }
     },
     "handlers": {
-        "stderr": {
-            "class": "logging.StreamHandler",
-            "level": "WARNING",
-            "formatter": "simple",
-            "stream": "ext://sys.stderr"
-        },
-        "file_json": {
-            "class": "logging.handlers.RotatingFileHandler",
-            "level": "DEBUG",
-            "formatter": "simple_json",
-            "filename": "logs/maspy.log.jsonl"
-        },
         "queue_handler": {
             "class": "logging.handlers.QueueHandler",
-            "handlers": [
-                "stderr", "file_json"
-            ],
+            "handlers": [],
             "respect_handler_level": true
         }
     },
