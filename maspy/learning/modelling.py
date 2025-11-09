@@ -92,7 +92,7 @@ class EnvModel(Model):
         self.reset()
         from maspy.environment import Percept
         for stt, (name, _) in zip(self.curr_state, self.initial_states.items()):
-            percept = self.env.get(Percept(name),ck_args=False)
+            percept = self.env.get(Percept(name),ck_values=False)
             if isinstance(stt, frozenset):
                 stt = dict(stt)
             self.env.change(percept, stt)
@@ -388,9 +388,9 @@ class EnvModel(Model):
         from maspy.environment import Percept
         state: tuple = tuple()
         for name in self.initial_states.keys():
-            percept = self.env.get(Percept(name),ck_args=False)
+            percept = self.env.get(Percept(name),ck_values=False)
             assert isinstance(percept, Percept)
-            state += (percept.args,)
+            state += (percept.values,)
         if state in self.terminated_states or HashableWrapper(state) in self.terminated_states:
             return state, True
         else:

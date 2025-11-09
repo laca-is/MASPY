@@ -58,7 +58,6 @@ class QueueListener(Handler):
 class MyJSONFormatter(Formatter):
     def __init__(self, *, fmt_keys: Dict[str, str] | None = None):
         super().__init__()
-        print("Initializing MyJSONFormatter")
         self._start_time = perf_counter()
         self.fmt_keys = fmt_keys if fmt_keys is not None else {}
     

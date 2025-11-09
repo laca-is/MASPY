@@ -3,7 +3,7 @@ import ctypes
 from logging import getLogger
 from dataclasses import dataclass, field
 from maspy.environment import Environment, Percept	
-from maspy.communication import Channel, Act
+from maspy.communication import Channel, Act, broadcast
 from maspy.learning import EnvModel
 from maspy.error import (
     InvalidBeliefError,
@@ -11,7 +11,7 @@ from maspy.error import (
     RunPlanError,
 )
 from maspy.utils import set_changes, merge_dicts, manual_deepcopy, fill_anys, bcolors, Condition
-from typing import List, Optional, Dict, Set, Any, Union, Type, cast, _SpecialForm, TypeGuard, TypeVar
+from typing import List, Optional, Dict, Set, Any, Union, Type, cast, _SpecialForm, TypeGuard, TypeVar, TYPE_CHECKING
 from collections.abc import Iterable, Callable, Sequence
 from collections import deque
 from time import sleep
@@ -52,42 +52,44 @@ PENDING_TIMER = 20
 @dataclass(eq=True, frozen=True)
 class Belief(Condition):
     name: str = field(default_factory=str)
-    _args: tuple | Any = field(default_factory=tuple)
+    _values: tuple | Any = field(default_factory=tuple)
     source: str = DEFAULT_SOURCE
     adds_event: bool = True
 
     @property
-    def args(self):
-        if len(self._args) > 1:
-            return self._args
-        elif len(self._args) == 1:
-            return self._args[0]
+    def values(self):
+        if len(self._values) > 1:
+            return self._values
+        elif len(self._values) == 1:
+            return self._values[0]
         else:
             return tuple()
         
     @property
-    def args_len(self):
-        return len(self._args)
+    def values_len(self):
+        return len(self._values)
 
     def __post_init__(self):
-        match self._args:
+        if not isinstance(self.name, str): raise TypeError(f"Belief.name[ {self.name} ] is not a string")
+        if not isinstance(self.source, str): raise TypeError(f"Belief.source[ {self.source} ] is not a string")
+        match self._values:
             case list() | dict() | str():
-                object.__setattr__(self, "_args", tuple([self._args]))
+                object.__setattr__(self, "_values", tuple([self._values]))
             case tuple():
                 pass
             case Iterable():
-                object.__setattr__(self, "_args", tuple(self._args))
+                object.__setattr__(self, "_values", tuple(self._values))
             case _:
-                object.__setattr__(self, "_args", tuple([self._args]))
+                object.__setattr__(self, "_values", tuple([self._values]))
 
     def weak_eq(self, other: "Belief"):
         return (
             self.name == other.name
-            and len(self._args) == len(other._args)
+            and len(self._values) == len(other._values)
             and self.source == other.source
         )
 
-    def change(self, key: str|None = None, args: Any|None = None, source: str|None = None, adds_event: bool|None = None) -> None:
+    def change(self, key: str|None = None, values: Any|None = None, source: str|None = None, adds_event: bool|None = None) -> None:
         frame = inspect.currentframe()
         caller_frame = frame.f_back if frame else None
         caller_locals = caller_frame.f_locals if caller_frame else None
@@ -96,7 +98,7 @@ class Belief(Condition):
             caller_instance.rm(self)
             new_belief = Belief(
                 key if key is not None else self.name,
-                args if args is not None else self._args,
+                values if values is not None else self._values,
                 source if source is not None else self.source,
                 adds_event if adds_event is not None else self.adds_event
             )
@@ -105,16 +107,21 @@ class Belief(Condition):
             print(f"{type(caller_instance)}, not an Agent instance, trying to change {self}")
 
     def __hash__(self) -> int:
-        args_tuple = tuple(
-            arg if type(arg).__dict__.get("__hash__") else 
-            repr(arg) if isinstance(arg, (List, Dict, Set, _SpecialForm)) else 
-            TypeError(f"Unhashable type: {arg}:{type(arg)}")
-            for arg in self._args
-        )
-        return hash((self.name, args_tuple, self.source))
+        values_hashable = []
+        for value in self._values:
+            value_dict = type(value).__dict__
+            if value_dict.get("__hash__"):
+                values_hashable.append(value)
+            elif isinstance(value, (List, Dict, Set)):
+                values_hashable.append(repr(value))
+            else:
+                raise TypeError(f"Belief.values[ {type(value)}:{value} ] is not hashable")
+        values_tuple = tuple(values_hashable)
+
+        return hash((self.name, values_tuple, self.source))
     
     def __str__(self) -> str:
-        s = f'Belief {self.name}({self.args})[{self.source}]'
+        s = f'Belief {self.name}({self.values if self.values else ""})[{self.source}]'
         return s.replace("typing.Any","Any")
     
     def __repr__(self):
@@ -123,41 +130,43 @@ class Belief(Condition):
 @dataclass
 class Goal(Condition):
     name: str = field(default_factory=str)
-    _args: tuple | Any = field(default_factory=tuple)
+    _values: tuple | Any = field(default_factory=tuple)
     source: str = DEFAULT_SOURCE
 
     @property
-    def args(self):
-        if len(self._args) > 1:
-            return self._args
-        elif len(self._args) == 1:
-            return self._args[0]
+    def values(self):
+        if len(self._values) > 1:
+            return self._values
+        elif len(self._values) == 1:
+            return self._values[0]
         else:
             return tuple()
         
     @property
-    def args_len(self):
-        return len(self._args)
+    def values_len(self):
+        return len(self._values)
 
     def __post_init__(self):
-        match self._args:
+        if not isinstance(self.name, str): raise TypeError(f"Goal.name[ {self.name} ] is not a string")
+        if not isinstance(self.source, str): raise TypeError(f"Goal.source[ {self.source} ] is not a string")
+        match self._values:
             case list() | dict() | str():
-                object.__setattr__(self, "_args", tuple([self._args]))
+                object.__setattr__(self, "_values", tuple([self._values]))
             case tuple():
                 pass
             case Iterable():
-                object.__setattr__(self, "_args", tuple(self._args))
+                object.__setattr__(self, "_values", tuple(self._values))
             case _:
-                object.__setattr__(self, "_args", tuple([self._args]))
+                object.__setattr__(self, "_values", tuple([self._values]))
 
     def weak_eq(self, other: "Goal"):
         return (
             self.name == other.name
-            and len(self._args) == len(other._args)
+            and len(self._values) == len(other._values)
             and self.source == other.source
         )
 
-    def change(self, key: str|None = None, args: Any|None = None, source: str|None = None, adds_event: bool|None = None) -> None:
+    def change(self, key: str|None = None, values: Any|None = None, source: str|None = None, adds_event: bool|None = None) -> None:
         frame = inspect.currentframe()
         caller_frame = frame.f_back if frame else None
         caller_locals = caller_frame.f_locals if caller_frame else None
@@ -166,29 +175,29 @@ class Goal(Condition):
             caller_instance.rm(self)
             new_belief = Belief(
                 key if key is not None else self.name,
-                args if args is not None else self._args,
+                values if values is not None else self._values,
                 source if source is not None else self.source
             )
             caller_instance.add(new_belief)
         else:
             print(f"{type(caller_instance)}, not an Agent instance, trying to change {self}")
-
+    
     def __hash__(self) -> int:
-        args_hashable = []
-        for arg in self._args:
-            arg_dict = type(arg).__dict__
-            if arg_dict.get("__hash__"):
-                args_hashable.append(arg)
-            elif isinstance(arg, (List, Dict, Set)):
-                args_hashable.append(repr(arg))
+        values_hashable = []
+        for value in self._values:
+            value_dict = type(value).__dict__
+            if value_dict.get("__hash__"):
+                values_hashable.append(value)
+            elif isinstance(value, (List, Dict, Set)):
+                values_hashable.append(repr(value))
             else:
-                raise TypeError(f"Unhashable type: {type(arg)}")
-        args_tuple = tuple(args_hashable)
+                raise TypeError(f"Goal.values[ {type(value)}:{value} ] is not hashable")
+        values_tuple = tuple(values_hashable)
 
-        return hash((self.name, args_tuple, self.source))
+        return hash((self.name, values_tuple, self.source))
     
     def __str__(self) -> str:
-        s = f"Goal {self.name}({self.args})[{self.source}]"
+        s = f"Goal {self.name}({self.values if self.values else ''})[{self.source}]"
         return s.replace("typing.Any","Any")
     
     def __repr__(self):
@@ -249,7 +258,7 @@ class Intention:
     args: tuple | Any = field(default_factory=tuple)
     
     def __str__(self) -> str:
-        return f"{self.event} -> {self.plan.body.__name__}() Context={fill_anys(repr(self.plan.context), repr(self.args))}"
+        return f"{self.event} -> {self.plan.body.__name__}() Context={self.plan.context,self.args}"
     
     def __repr__(self):
         return self.__str__()
@@ -267,8 +276,10 @@ def pl(change: Event_Change, data: Belief | Goal, context: Belief | Goal | List[
             self.func = func
   
         def __set_name__(self, instance: Agent, name: str):
-            if not isinstance(change, Event_Change) or not isinstance(data, Belief | Goal):
-                raise TypeError
+            if not isinstance(change, Event_Change): 
+                raise TypeError(f"Expected {Event_Change._member_names_} for Change, got {type(change).__name__}:{change}")
+            if not isinstance(data, Belief | Goal):
+                raise TypeError(f"Expected Belief or Goal for Information, got {type(data).__name__}:{data}")
 
             context_condition: List[tuple[bool, Belief | Goal]] | Condition
             
@@ -387,7 +398,7 @@ class Agent:
         self.percept_filter: Dict[str, set[str]] = {ignore.name: set(), focus.name: set()}
         
         self.saved_msgs: deque = deque()
-        self.last_sent: list[tuple[str, str | List[str], str, MSG]] = []
+        self.last_sent: list[tuple[str, str | List[str] | broadcast, str, MSG]] = []
         self.last_recv: list[tuple[str, MSG]] = []
         self.last_plan: Plan | None = None
         self.relevant_plans: List[Plan] | None = None
@@ -416,6 +427,7 @@ class Agent:
     #     Admin().start_agents(self)
     
     def print(self,*args, **kwargs):
+        """Formatted MASPY Print Function"""
         if not self.printing:
             return
         f_args = "".join(map(str, args))
@@ -463,7 +475,7 @@ class Agent:
     @property
     def print_events(self):
         """Prints all Events of the Agent"""
-        print("Events:",self.__events) 
+        self.print("Events:",self.__events) 
     
     @property
     def print_intentions(self):
@@ -498,7 +510,19 @@ class Agent:
             "chs": list(self._channels.keys())
         }
     
-    def filter_perceptions(self, operation: Operation, option: Option, group: str | list[str]):
+    def filter_perceptions(self, operation: Operation, option: Option, group: List[str] | str):
+        """
+        Filters how the Agents perceives the Environment - by ignoring and(or) focusing on Percept's groups
+
+        Parameters
+        ----------
+            operation : Operation[add or rm]
+                Adding or removing a filter to the Agent.
+            option : Option[ignore or focus]
+                Determines whether to ignore or focus on the given groups.
+            group : List or str or str
+                The group(s) to ignore or focus on.
+        """
         assert isinstance(operation,Operation), f"Invalid operation. Choose {Operation}."
         assert isinstance(option,Option), f"Invalid option. Choose {Option}."
 
@@ -521,14 +545,15 @@ class Agent:
 
         Parameters
         ----------
-            target : 
-                Channel, Environment or str
-                    - Connects to the given instance
-                    - or Searches for a file with 'str' filename to connect
-        Returns:
-            connection (Environment, Channel or None): 
-                - Connected Environment, Channel 
-                - or None when no connectable target is found
+            target : Environment or Channel
+                Connects to the given instance
+            target : str
+                Searches for a file with 'str' filename to connect
+        Returns
+        -------
+            connection : (Environment or Channel
+                The connected Environment or Channel 
+            None : when no connectable target is found
         """
         if isinstance(target, str):
             instance = Environment.get_instance(target) or Channel.get_instance(target)
@@ -602,29 +627,6 @@ class Agent:
         if policy.name not in self._environments.keys():
             self.connect_to(policy.env)
     
-    def add_plan(self, plan: Plan | Iterable[Plan]):
-        """
-        - Adds one or more plans to the agent
-        
-        Args: 
-            plan (Plan or Plan List): The Plans to be added
-        """
-        plans = self._clean_plans(plan)
-        self._plans += plans
-
-    def rm_plan(self, plan: Plan | Iterable[Plan]):
-        """ 
-        - Removes one or more plans from the agent
-        
-        args: 
-            plan (Plan or Plan List): The Plans to be removed
-        """
-        if isinstance(plan, Iterable):
-            for p in plan: 
-                self._plans.remove(p)
-        else:
-            self._plans.remove(plan)
-    
     def _new_event(self,change: Event_Change, data: Belief | Goal | Percept | Iterable[Belief | Goal| Percept], instant: bool = False):
         new_event: Event
         if not isinstance(data, Iterable):
@@ -688,14 +690,14 @@ class Agent:
 
     def add(self, data_type: Belief | Goal | Plan | Iterable[Belief | Goal | Plan], instant: bool = False):
         """
-        Adds one or more beliefs and(or) goals to the agent.
+        Adds one or more Beliefs, Goals or Plans to the Agent.
 
         Parameters
         ----------
         data_type : Belief, Goal, Plan, or list of Beliefs, Goals, or Plans
             The information to be added.
         instant : bool, default=False
-            If True, the created Event will be treated instantly.
+            If True, an applicable plan with the triggered event is executed immediately
         """
         #print(f"Add {data_type} | {self._check_caller()}")
         
@@ -732,14 +734,14 @@ class Agent:
     
     def rm(self, data_type: Belief | Goal | Plan | Iterable[Belief | Goal | Plan], instant: bool = False):
         """
-        Adds one or more beliefs and(or) goals to the agent.
+        Adds one or more Beliefs, Goals or PLans to the Agent.
 
         Parameters
         ----------
         data_type : Belief, Goal, Plan, or list of Beliefs, Goals, or Plans
             The information to be removed.
         instant : bool, default=False
-            If True, the created Event will be treated instantly.
+            If True, an applicable plan with the triggered event is executed immediately
         """
         #print(f"Rm {data_type} | {self._check_caller()}")
         if self.running is False:
@@ -768,14 +770,14 @@ class Agent:
 
     def test(self, data_type: Belief | Goal, instant: bool = False):
         """
-        Tests if the agent has a Belief or Goal
+        Tests if the Agent has a Belief or Goal
 
         Parameters
         ----------
         data_type : Belief or Goal
             The information to be tested
         instant : bool, default=False
-            If True, the created Event will be treated instantly
+            If True, an applicable plan with the triggered event is executed immediately
         """
         if self.running is False:
             instant = False
@@ -798,7 +800,7 @@ class Agent:
 
     def get(self, data_type: Belief | Goal | Plan | Event | Type[Belief | Goal | Plan | Event],
         search_with:  Optional[Belief | Goal | Plan | Event] = None,
-        all = False, ck_chng=True, ck_type=True, ck_args=True, ck_src=True, no_lock=False
+        all = False, ck_chng=True, ck_type=True, ck_values=True, ck_src=True, no_lock=False
     ) -> Belief | Goal | Plan | Event | List[Belief | Goal | Plan | Event] | None:
         """
         Retrieves specific data from the agent's knowledge on the given data_type and search parameters
@@ -815,7 +817,7 @@ class Agent:
                 Whether to check the changes argument in the data.
             ck_type : bool, default=True
                 Whether to check the type of the data.
-            ck_args : bool, default=True
+            ck_values : bool, default=True
                 Whether to check the arguments of the data.
             ck_src : bool, default=True
                 Whether to check the source of the data.
@@ -843,14 +845,14 @@ class Agent:
                 if isinstance(type_base, tuple):
                     for base in type_base:
                         with self.lock:
-                            found = self._search(base, data, ck_type, ck_args, ck_src, all)
+                            found = self._search(base, data, ck_type, ck_values, ck_src, all)
                         if all:
                             found_data.extend(found)
                         if not all and found:
                             return found
                 elif isinstance(type_base, dict):
                     with lock:
-                        found = self._search(type_base, data, ck_type, ck_args, ck_src, all)
+                        found = self._search(type_base, data, ck_type, ck_values, ck_src, all)
                     if all:
                         found_data.extend(found)
                     if not all and found:
@@ -862,7 +864,7 @@ class Agent:
                     
                     if change and ck_chng and chng != change:
                         continue
-                    if self._compare_data(belf_goal,data,ck_type,ck_args,ck_src):
+                    if self._compare_data(belf_goal,data,ck_type,ck_values,ck_src):
                         found_data.append(plan_event)
                         if not all: 
                             return plan_event
@@ -884,17 +886,17 @@ class Agent:
                 self.print(f'Does not contain {type(data_type).__qualname__} like {search_with}. Searched during {caller_function_name}()')
             return None
     
-    def _search(self, type_base: Dict[str, Dict[str, Set[Belief]]] | Dict[str, Dict[str, Set[Percept]]] | Dict[str, Dict[str, Set[Goal]]], data, ck_type, ck_args, ck_src, all):
+    def _search(self, type_base: Dict[str, Dict[str, Set[Belief]]] | Dict[str, Dict[str, Set[Percept]]] | Dict[str, Dict[str, Set[Goal]]], data, ck_type, ck_values, ck_src, all):
         found = []
         for keys in type_base.values():
-            for values in keys.values():
-                for value in values:
-                    if isinstance(value, Percept):
-                        value = Belief(value.name, value.args, value.source, value.adds_event)
-                    if self._compare_data(value,data,ck_type,ck_args,ck_src):
-                        found.append(value)
+            for data_type_set in keys.values():
+                for data_type in data_type_set:
+                    if isinstance(data_type, Percept):
+                        data_type = Belief(data_type.name, data_type.values, data_type.source, data_type.adds_event)
+                    if self._compare_data(data_type,data,ck_type,ck_values,ck_src):
+                        found.append(data_type)
                         if not all: 
-                            return value  
+                            return data_type  
         return found
          
     def wait(self, timeout: Optional[float] = None, event: Optional[Event] = None):
@@ -1000,7 +1002,7 @@ class Agent:
             The data type used to remove events.
         """
         for event in self.__events:
-            if self._compare_data(event.data, data_type, ck_type=True, ck_args=True, ck_src=False):
+            if self._compare_data(event.data, data_type, ck_type=True, ck_values=True, ck_src=False):
                 self.__events.remove(event)
     
     def drop_intention(self, data_type: Belief | Goal):  
@@ -1013,7 +1015,7 @@ class Agent:
             The data type used to remove intentions.
         """       
         for intention in self.__intentions:
-            if self._compare_data(intention.plan.trigger.data, data_type, ck_type=True, ck_args=True, ck_src=False): 
+            if self._compare_data(intention.plan.trigger.data, data_type, ck_type=True, ck_values=True, ck_src=False): 
                 self.__intentions.remove(intention)
 
     def _get_running_intentions(self):
@@ -1028,13 +1030,13 @@ class Agent:
             case Plan(): 
                 event_dt = data_type.trigger.data
                 if isinstance(event_dt, Percept):
-                    event_dt = Belief(event_dt.name, event_dt.args, event_dt.source)
+                    event_dt = Belief(event_dt.name, event_dt.values, event_dt.source)
                 change = data_type.trigger.change
                 belief_goal = event_dt
             case Event(): 
                 event_dt = data_type.data
                 if isinstance(event_dt, Percept):
-                    event_dt = Belief(event_dt.name, event_dt.args, event_dt.source)
+                    event_dt = Belief(event_dt.name, event_dt.values, event_dt.source)
                 change = data_type.change
                 belief_goal = event_dt
             case _: 
@@ -1042,7 +1044,7 @@ class Agent:
                 return None, None
         return change,belief_goal
     
-    def _compare_data(self, data1: Belief | Goal | Percept, data2: Belief | Goal | Percept, ck_type: bool, ck_args: bool, ck_src: bool):
+    def _compare_data(self, data1: Belief | Goal | Percept, data2: Belief | Goal | Percept, ck_type: bool, ck_values: bool, ck_src: bool):
         buffer = f"Comparing: {data1}  &  {data2}"
         if ck_type and type(data1) is not type(data2):
             self.print(f"{buffer} >> Different type") if self.show_slct else ...
@@ -1053,28 +1055,28 @@ class Agent:
         if ck_src and data2.source != DEFAULT_SOURCE and data1.source != data2.source:
             self.print(f"{buffer} >> Different source") if self.show_slct else ...
             return False
-        if not ck_args:
+        if not ck_values:
             return True
-        if data1.args_len != data2.args_len:
-            self.print(f"{buffer} >> Different args length") if self.show_slct else ...
+        if data1.values_len != data2.values_len:
+            self.print(f"{buffer} >> Different values length") if self.show_slct else ...
             return False
-        for arg1,arg2 in zip(data1._args,data2._args):
+        for arg1,arg2 in zip(data1._values,data2._values):
             if arg1 is Any or arg2 is Any or arg1 == arg2:
                 continue
             else:
-                self.print(f"{buffer} >> Different args {arg1} x {arg2}") if self.show_slct else ...
+                self.print(f"{buffer} >> Different values {arg1} x {arg2}") if self.show_slct else ...
                 return False
         else:
             self.print(f"{buffer} >> Compatible") if self.show_slct else ...
             return True
     
-    def send(self, target: str | List[str], msg_act: Act, msg: MSG, channel: str = DEFAULT_CHANNEL) -> None | Belief | Goal | Plan | Iterable[Belief | Goal | Plan]: 
+    def send(self, target: str | List[str] | broadcast, msg_act: Act, msg: MSG, channel: str = DEFAULT_CHANNEL) -> None | Belief | Goal | Plan | Iterable[Belief | Goal | Plan]: 
         """
         Sends a message to a target agent or list of agents, optionally through a channel
         
         Parameters
         ----------
-            target : str or list of str: 
+            target : str, list of str or broadcast: 
                 a broadcast, target agent name, or agent names to send the message to.
             msg_act : Act :
                 The type of message being sent.
@@ -1135,18 +1137,21 @@ class Agent:
                 self.logger.debug(f'Send Message: {self.my_name}  broadcasting  {msg_act.name} {msg} {ch}', extra=self.agent_info) if self.logging else ...
                 # self.save_cycle_log("Send Message", f' {self.my_name}  broadcasting  {msg_act.name} {msg}{ch}')
         except KeyError:
+            if self.show_exec:
+                self.print(f'Not Connected to Selected Channel:{channel}')
             self.logger.warning(f'Agent:{self.my_name} Not Connected to Selected Channel:{channel}', extra=self.agent_info) if self.logging else ...
+            raise KeyError(f"Connection Error: Not Connected to Selected Channel:{channel}")
         except AssertionError:
             raise
         return None
     
-    def sendf(self, target: str | List[str], msg: MSG, forget: bool = False, channel: str = DEFAULT_CHANNEL) -> None:   
+    def sendf(self, target: str | List[str] | broadcast, msg: MSG, forget: bool = False, channel: str = DEFAULT_CHANNEL) -> None:   
         """
         Sends a message to a target agent or list of agents, optionally through a channel
         
         Parameters
         ----------
-            target : str or list of str: 
+            target : str, list of str or broadcast: 
                 a broadcast, target agent name, or agent names to send the message to.
             msg : Belief, Goal, Ask, Plan or Beliefs, Goals, Asks or Plans 
                 The message to be sent.
@@ -1178,19 +1183,21 @@ class Agent:
                 self.logger.debug(f'Send Message: {self.my_name}  broadcasting  {typ} {msg} {ch}', extra=self.agent_info) if self.logging else ...
                 # self.save_cycle_log("Send Message", f' {self.my_name}  broadcasting  {msg_act.name} {msg}{ch}')
         except KeyError:
+            if self.show_exec:
+                self.print(f'Not Connected to Selected Channel:{channel}')
             self.logger.warning(f'Agent:{self.my_name} Not Connected to Selected Channel:{channel}', extra=self.agent_info) if self.logging else ...
         except AssertionError:
             raise
         return None
 
-    def ask(self, target: str | List[str], msg: MSG, all: bool = False, wait_reply: bool = False, channel: str = DEFAULT_CHANNEL) -> None | Belief | Goal | Plan | Iterable[Belief | Goal | Plan]:
+    def ask(self, target: str | List[str] | broadcast, msg: MSG, all: bool = False, wait_reply: bool = False, channel: str = DEFAULT_CHANNEL) -> None | Belief | Goal | Plan | Iterable[Belief | Goal | Plan]:
         """
         Sends a message to target agent asking for an information
         Optionally, the agent can wait for the reply
 
         Parameters
         ----------
-            target : str or list of str: 
+            target : str, list of str or broadcast: 
                 a broadcast, target agent name, or agent names to send the message to.
             msg : Belief, Goal, Plan or Beliefs, Goals, Asks or Plans 
                 The information being Asked.
@@ -1312,11 +1319,11 @@ class Agent:
                 found_data = self.get(msg.data_type,ck_src=False,no_lock=True)
                 if isinstance(found_data, Belief):
                     msg.reply_content = Belief(
-                        found_data.name, found_data.args, 
+                        found_data.name, found_data.values, 
                         self.my_name, found_data.adds_event)
                 elif isinstance(found_data, Goal):
                     msg.reply_content = Goal(
-                        found_data.name, found_data.args,self.my_name
+                        found_data.name, found_data.values,self.my_name
                     )
                 else:
                     msg.reply_content = None
@@ -1338,11 +1345,11 @@ class Agent:
                     for data in found_data:
                         if isinstance(found_data, Belief):
                             content.append(Belief(
-                                found_data.name, found_data.args, 
+                                found_data.name, found_data.values, 
                                 self.my_name, found_data.adds_event))
                         elif isinstance(found_data, Goal):
                             content.append(Goal(
-                                found_data.name, found_data.args,self.my_name
+                                found_data.name, found_data.values,self.my_name
                             ))
                     msg.reply_content = content
                 else:
@@ -1390,11 +1397,11 @@ class Agent:
                 found_data = self.get(msg.data_type,ck_src=False,no_lock=True)
                 if isinstance(found_data, Belief):
                     msg.reply_content = Belief(
-                        found_data.name, found_data.args, 
+                        found_data.name, found_data.values, 
                         self.my_name, found_data.adds_event)
                 elif isinstance(found_data, Goal):
                     msg.reply_content = Goal(
-                        found_data.name, found_data.args,self.my_name
+                        found_data.name, found_data.values,self.my_name
                     )
                 elif isinstance(found_data, Plan):
                     msg.reply_content = found_data
@@ -1418,11 +1425,11 @@ class Agent:
                     for data in found_data:
                         if isinstance(found_data, Belief):
                             content.append(Belief(
-                                found_data.name, found_data.args, 
+                                found_data.name, found_data.values, 
                                 self.my_name, found_data.adds_event))
                         elif isinstance(found_data, Goal):
                             content.append(Goal(
-                                found_data.name, found_data.args,self.my_name
+                                found_data.name, found_data.values,self.my_name
                             ))
                         elif isinstance(found_data, Plan):
                             content.append(found_data)
@@ -1501,7 +1508,7 @@ class Agent:
     
     def action(self,env_name:str) -> Environment | None:
         """
-        ### Depreciated
+        # Depreciated
         
         Aquires Instance of Environment with given Name
 
@@ -1531,13 +1538,15 @@ class Agent:
                 return wrapper
         raise AttributeError(f"{self.my_name} doesnt have the method '{name}' and is not connected to any environment with the method '{name}'.")
     
-    def start_cycle(self, start_flag: threading.Event | None = None) -> None:    
+    def start_cycle(self, start_flag: threading.Event | None = None) -> None:
+        """Starts the Agent's Reasoning Cycle"""    
         self.running = True
         self.stop_flag = threading.Event()
-        self.thread = threading.Thread(target=self.cycle,args=(start_flag,self.stop_flag,))
+        self.thread = threading.Thread(target=self._cycle,args=(start_flag,self.stop_flag,))
         self.thread.start()
     
     def stop_cycle(self, log_flag=False) -> None:
+        """Stops the Agent's Reasoning Cycle"""
         self.running = False
         self.logger.debug("Ending Reasoning", extra=self.agent_info) if self.logging else ...
         # self.save_cycle_log(decision="End of Reasoning")
@@ -1546,7 +1555,7 @@ class Agent:
         self.paused_agent = True
         #sys.exit()
                  
-    def cycle(self, start_flag: threading.Event, stop_flag: threading.Event) -> None:
+    def _cycle(self, start_flag: threading.Event, stop_flag: threading.Event) -> None:
         if start_flag is not None:
             start_flag.wait()
  
@@ -1563,7 +1572,7 @@ class Agent:
             num_running_intentions = self.__running_intentions.__len__()
             self.curr_event, pending_flag = self._select_event()
             self.relevant_plans = self._retrieve_plans(self.curr_event)
-            self._create_intentions(self.relevant_plans, self.curr_event, pending_flag)
+            self._create_intention(self.relevant_plans, self.curr_event, pending_flag)
             intention = self._select_intention()
             
             if stop_flag.is_set():
@@ -1591,6 +1600,7 @@ class Agent:
             else:
                 if self.last_log != "idle":
                     self.last_log = "idle"
+                    if self.show_exec: self.print("Idle")
                     self.logger.debug("Idle", extra=self.agent_info) if self.logging else ...
                 try:
                     self.idle_counter += 1
@@ -1611,6 +1621,7 @@ class Agent:
             env = self._environments[strat.env.my_name]
             str_action = strat.actions_list[int_action]
             action = strat.actions_dict[str_action]
+            if self.show_exec: self.print(f"Executing Strategy {strat.name}({str_action})")
             self.logger.debug(f"Executing Strategy {strat.name}({str_action})", extra=self.agent_info) if self.logging else ...
             if not isinstance(str_action, str):
                 str_action = str_action.original
@@ -1661,6 +1672,16 @@ class Agent:
         return last_message
                 
     def best_action(self, env_name: str, set_state: Any = None) -> None:
+        """
+        Executes the best trained Action on the given Environment, optionally on a given State
+        
+        Parameters
+        ----------
+            env_name : str
+                The name of the Environment the Agent has a trained model for.
+            set_state : (Any, optional)
+                A given state for this Environment. Defaults to None.
+        """
         assert isinstance(env_name, str), f"best_action must receive string envrironment name not {type(env_name).__qualname__}"
         
         for strat in self._strategies:
@@ -1688,6 +1709,7 @@ class Agent:
             # self.save_cycle_log(decision, description)
             break
         else:
+            if self.show_exec: self.print(f"No policy for Environment: {env_name}")
             self.logger.warning(f"No policy for Environment: {env_name}", extra=self.agent_info) if self.logging else ...
     
     def _perception(self) -> None:
@@ -1695,7 +1717,7 @@ class Agent:
         percept_dict: Dict[str, dict] = dict()
         with self.env_lock:
             for env_name in self._environments:
-                percepts = self._environments[env_name].perception()
+                percepts = self._environments[env_name]._perception()
                 percepts = self._apply_filters(percepts,env_name)
                 merge_dicts(percepts,percept_dict)
         if percept_dict == {}:
@@ -1718,13 +1740,15 @@ class Agent:
         return filtered_percepts
 
     def perceive(self, env_name: str | List[str]) -> None:
-        # Perceives the specified environment(s) and updates the agent's beliefs.
         """
+            Instantly Perceives the given Environment(s) and updates the agent's beliefs.
+            
             Parameters
             ----------
             env_name : str or list of strs 
-                - The name of the environment or a list of environment names to perceive.
-                - env_name can also accept "all" to perceive all connected environments.
+                The name(s) of the connected environment(s) to perceive.
+                
+                env_name also accepts "**all**" to perceive all connected environments.
         """
         if env_name == "all":
             self._perception()
@@ -1734,18 +1758,20 @@ class Agent:
         if isinstance(env_name, list):
             for name in env_name:
                 try:
-                    percepts = self._environments[name].perception()
+                    percepts = self._environments[name]._perception()
                     percepts = self._apply_filters(percepts,name)
                     self.logger.info(f"Perceiving {name} : {percepts}", extra=self.agent_info) if self.logging else ...
                     merge_dicts(percepts,percept_dict)
                 except KeyError:
+                    if self.show_exec: self.print(f"Not Connected to Environment:{name}")
                     self.logger.warning(f"Not Connected to Environment:{name}", extra=self.agent_info) if self.logging else ...
         else:
             try:
-                percept_dict = self._environments[env_name].perception()
+                percept_dict = self._environments[env_name]._perception()
                 percept_dict = self._apply_filters(percept_dict,env_name)
                 self.logger.info(f"Perceiving {env_name} : {percept_dict}", extra=self.agent_info) if self.logging else ...
             except KeyError:
+                if self.show_exec: self.print(f"Not Connected to Environment:{env_name}")
                 self.logger.warning(f"Not Connected to Environment:{env_name}", extra=self.agent_info) if self.logging else ...
         
         #belief_dict = self._percepts_to_beliefs_new(percept_dict)
@@ -1758,14 +1784,14 @@ class Agent:
             for key,percepts_set in keys.items():
                 belief_set: Set[Belief] = set()
                 for percept in percepts_set:
-                    belief_set.add(Belief(percept.name,percept.args,source,percept.adds_event))
+                    belief_set.add(Belief(percept.name,percept.values,source,percept.adds_event))
                 beliefs[source][key] = belief_set
         return beliefs
     
     def _percepts_to_beliefs_new(self,percepts: Dict[str, Dict[str, Set[Percept]]]) -> Dict[str, Dict[str, Set[Belief]]]:
         beliefs: Dict[str, Dict[str, Set[Belief]]] = {
             source: {
-                key: {Belief(percept.name, percept.args, source, percept.adds_event) for percept in percepts_set}
+                key: {Belief(percept.name, percept.values, source, percept.adds_event) for percept in percepts_set}
                 for key, percepts_set in keys.items()
             }
             for source, keys in percepts.items()
@@ -1821,16 +1847,16 @@ class Agent:
     def _instant_plan(self, event: Event):
         plans = self._retrieve_plans(event)
         if plans is None:
-            if event is not None and isinstance(event.data,Goal) and event.change.name == "gain":
+            if isinstance(event.data,Goal) and event.change.name == "gain":
                 if self.logging:
-                    self.logger.warning(f"Found no applicable plan for {event}", extra=self.agent_info)  
+                    self.logger.warning(f"Doesn't have Plan with {event} as trigger event", extra=self.agent_info)  
                 else:
-                    print(f"[WARNING] Found no applicable plan for {event}")
-            elif event is not None and isinstance(event.data,Belief):
+                    self.print(f"Doesn't have Plan with {event} as trigger event")
+            elif isinstance(event.data,Belief):
                 if self.logging:
-                    self.logger.debug(f"Found no applicable plan for {event}", extra=self.agent_info)
+                    self.logger.debug(f"Doesn't have Plan with {event} as trigger event", extra=self.agent_info)
                 else:
-                    print(f"[DEBUG] Found no applicable plan for {event}")
+                    self.print(f"Doesn't have Plan with {event} as trigger event")
             return
             
         args = None
@@ -1841,17 +1867,17 @@ class Agent:
                 break
             
         if args is not None:
-            if event.data.args_len < 2:
-                ev_args = event.data._args
+            if event.data.values_len < 2:
+                ev_args = event.data._values
             else:
-                ev_args = (event.data._args,)
+                ev_args = (event.data._values,)
             self.logger.debug(f"Instant Plan: {self._format_data('Instant Plan',plan,event,ev_args+args)}", extra=self.agent_info) if self.logging else ...
             # self.save_cycle_log("Instant Plan", self._format_data("Instant Plan",plan,event,ev_args+args),event,plans)
             self._run_plan(Intention(plan,event,ev_args+args),True)
         elif type(event.data) is Goal and event.change.name == "gain":
-            self.logger.warning(f"Improper context for applicable plan(s) with {event}", extra=self.agent_info) if self.logging else ...
+            self.logger.warning(f"Doesnt have Plan with proper context for Event {event}", extra=self.agent_info) if self.logging else ...
         else:
-            self.logger.debug(f"Improper context for applicable plan(s) with {event}", extra=self.agent_info) if self.logging else ...
+            self.logger.debug(f"Doesnt have Plan with proper context for Event {event}", extra=self.agent_info) if self.logging else ...
     
     def _retrieve_plans(self, event: Event | None) -> List[Plan] | None: 
         if event is None: 
@@ -1860,13 +1886,13 @@ class Agent:
         assert isinstance(retrieved, list | None), f"Unexpected Retrieved Plan: {type(retrieved)}, Expected List[Plan] | None"
         return cast(List[Plan] | None, retrieved) 
     
-    def _create_intentions(self, plans: List[Plan] | None, event: Event | None, pending_flag: bool):
+    def _create_intention(self, plans: List[Plan] | None, event: Event | None, pending_flag: bool):
         if plans is None or event is None:
             if event is not None and isinstance(event.data,Goal) and event.change.name == "gain":
                 if self.logging:
-                    self.logger.warning(f"Found no relevant plan for {event}", extra=self.agent_info)  
+                    self.logger.warning(f"Doesn't have Plan with {'' if pending_flag else 'Pending '}{event} as trigger event", extra=self.agent_info)  
                 else:
-                    print(f"[WARNING] Agent {self.my_name} found no relevant plan for {event}")
+                    self.print(f"Doesn't have Plan with {'' if pending_flag else 'Pending '}{event} as trigger event")
                 if pending_flag:
                     self._pending_events.append((event,self.cycle_counter+PENDING_TIMER,"relevant"))
                 else:
@@ -1874,7 +1900,7 @@ class Agent:
                     self.__goals[typ.source][typ.name].remove(typ)
                     self._new_event(failure, event.data, instant=False)
             elif event is not None and isinstance(event.data,Belief):
-                self.logger.debug(f"Found no relevant plan for {event}", extra=self.agent_info) if self.logging else ...
+                self.logger.debug(f"Doesn't have Plan for {event} as trigger event", extra=self.agent_info) if self.logging else ...
             return
         
         applicable_flag = True
@@ -1882,12 +1908,12 @@ class Agent:
         while retrieved_plans:
             plan = retrieved_plans.pop(0)
             ctxt = self._retrieve_context(plan)
-            if ctxt is not None and event is not None:
+            if ctxt is not None:
                 applicable_flag = False
-                if event.data.args_len < 2:
-                    ev_args = event.data._args
+                if event.data.values_len < 2:
+                    ev_args = event.data._values
                 else:
-                    ev_args = (event.data._args,)
+                    ev_args = (event.data._values,)
                 
                 if ctxt == ((),):
                     args = ev_args
@@ -1900,9 +1926,9 @@ class Agent:
                 
         if applicable_flag and event is not None and isinstance(event.data,Goal) and event.change.name == "gain":
             if self.logging:
-                self.logger.warning(f"Found no applicable Plan with proper context for Event {event}", extra=self.agent_info)  
+                self.logger.warning(f"Doesnt have Plan with proper context for {'' if pending_flag else 'Pending '}Event {event}", extra=self.agent_info)  
             else:
-                self.print(f"Found no applicable Plan with proper context for Event {event}")
+                self.print(f"Doesnt have Plan with proper context for {'' if pending_flag else 'Pending '}Event {event}")
             
             if pending_flag:
                 self._pending_events.append((event,self.cycle_counter+PENDING_TIMER,"applicable"))
@@ -1944,12 +1970,12 @@ class Agent:
                     continue
                 break
             assert isinstance(ctxt, Belief | Goal), f"Unexpected Context Type: {type(ctxt)}, Expected Belief | Goal"
-            if ctxt.args_len == 0: 
+            if ctxt.values_len == 0: 
                 continue
-            elif ctxt.args_len == 1:
-                args += ctxt._args
+            elif ctxt.values_len == 1:
+                args += ctxt._values
             else:
-                args += (ctxt._args,)  
+                args += (ctxt._values,)  
             
         else:
             return args
@@ -1972,10 +1998,10 @@ class Agent:
             v_data = self.get(f_value, ck_src=False)
             if v_data is not None:
                 v_bool = True
-                v_data = v_data._args
+                v_data = v_data._values
             else:
                 v_data = (None,)
-            for v in f_value._args:
+            for v in f_value._values:
                 if v is Any:
                     v_args = True
         elif isinstance(f_value, bool):
@@ -2061,7 +2087,10 @@ class Agent:
     def _execute_plan(self, intention: Intention):
         if self.__running_intentions.__len__() >= self.max_intentions:
             self.__intentions.insert(0,intention)
-            self.logger.debug(f"Plan {intention.plan} not executed as max intentions reached", extra=self.agent_info) if self.logging else ...
+            if self.logging:
+                self.logger.debug(f"Intention {intention} not executed as max intentions reached", extra=self.agent_info) 
+            else:
+                self.print(f"Intention {intention} not executed as max intentions reached")
             return None
         try:
             #assert trigger is not None, f"Unexpected None Trigger with {chosen_plan}:{args}"
@@ -2071,18 +2100,24 @@ class Agent:
             plan_thread.start()
             
         except RunPlanError:
-            self.logger.warning(f"Plan {intention.plan} failed", extra=self.agent_info) if self.logging else ...
+            if self.logging:
+                self.logger.warning(f"Intention {intention} failed", extra=self.agent_info)
+            else:
+                self.print(f"Intention {intention} failed")
 
     def _run_plan(self, intention: Intention, instant_flag: bool = False):
-        self.logger.debug(f"Executing Intention", extra=self.agent_info) if self.logging else ...
-        self.print(f"Running {intention.plan}")  if self.show_exec or self.show_cycle else ...
+        self.logger.debug(f"Executing Intention :{intention}", extra=self.agent_info) if self.logging else ...
+        self.print(f"Executing Intention : {intention}")  if self.show_exec or self.show_cycle else ...
         try:     
             result = intention.plan.body(self, intention.event.data.source, *intention.args)
                 
             self.last_event = intention.event
             trigger_data = intention.event.data    
             if result == "Error" or result == -1:
-                self.logger.warning(f"{intention.plan} did not complete successfully", extra=self.agent_info) if self.logging else ...
+                if self.logging:
+                    self.logger.warning(f"Intention {intention} did not complete successfully", extra=self.agent_info)
+                else:
+                    self.print(f"Intention {intention} did not complete successfully, recreating Event {intention.event}")
             else:
                 #print(f'Remove {(plan,trigger,args)} in {self.__intentions}',flush=True)
                 #self.__intentions.remove((plan,trigger,args))
@@ -2100,9 +2135,14 @@ class Agent:
                     elif self.has(trigger_data) and result != False:
                         self.rm(trigger_data)
                         self._new_event(success, trigger_data, instant=False)
+                        if self.show_exec:
+                            self.print(f"{intention} successfully cleared")
                         self.logger.info(f"{intention.event} cleared", extra=self.agent_info) if self.logging else ...
                     else:
-                        self.logger.warning(f"{trigger_data} already cleared by another plan's execution", extra=self.agent_info) if self.logging else ...
+                        if self.logging:
+                            self.logger.warning(f"{trigger_data} already cleared by another plan's execution", extra=self.agent_info)
+                        else:
+                            self.print(f"{trigger_data} already cleared by another plan's execution")
             self.last_plan = intention.plan
             return result
         except Exception as e:
@@ -2127,8 +2167,16 @@ class Agent:
                     buffer += f"\n\tCheck Plan '{intention.plan.body.__name__}' for self, src, and trigger/context args"
             else:
                 buffer += " No matching traceback entries found."
-                
-            buffer += f"\n\n<{self.my_name}> Error while executing {intention}\n\t{repr(e)}\n"
+            
+            buffer += f"\n\n<{self.my_name}> Error while executing {intention}\n"
+            if "is not a" in str(e):
+                buffer += f"\tWhile creating a \033[1m{str(e).split('.')[0]}\033[0m: {repr(e)}\n"
+            elif "is not hash" in str(e):
+                buffer += f"\tWhile adding a \033[1m{str(e).split('.')[0]}\033[0m: {repr(e)}\n"
+            else:      
+                buffer += f"\t{repr(e)}\n"
+            if "args" in str(e):
+                buffer += f"\tThe \033[1margs\033[0m parameter in Belief/Goal/Percept was changed to \033[1mvalues\033[0m\n\tPlease replace <>.args to <>.values in your implementation" 
             print(buffer)
             exit(-1) 
     

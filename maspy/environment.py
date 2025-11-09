@@ -15,24 +15,25 @@ DEFAULT_GROUP = "none"
 
 @dataclass
 class Percept:
+    """Represents a Observable (Perceivable) component of the Environment"""
     name: str = field(default_factory=str)
-    _args: tuple | Any = field(default_factory=tuple)
+    _values: tuple | Any = field(default_factory=tuple)
     _group: str | Group = DEFAULT_GROUP
     adds_event: bool = True
     source: str = field(default_factory=str)
     
     @property
-    def args(self):
-        if len(self._args) > 1:
-            return self._args
-        elif len(self._args) == 1:
-            return self._args[0]
+    def values(self):
+        if len(self._values) > 1:
+            return self._values
+        elif len(self._values) == 1:
+            return self._values[0]
         else:
             return tuple()
     
     @property
-    def args_len(self):
-        return len(self._args)
+    def values_len(self):
+        return len(self._values)
 
     @property
     def group(self):
@@ -45,35 +46,35 @@ class Percept:
             return ""
     
     def __post_init__(self):
-        match self._args:
+        match self._values:
             case list() | dict() | str():
-                object.__setattr__(self, "_args", tuple([self._args]))
+                object.__setattr__(self, "_values", tuple([self._values]))
             case tuple():
                 pass
             case Iterable():
-                object.__setattr__(self, "_args", tuple(self._args))
+                object.__setattr__(self, "_values", tuple(self._values))
             case _:
-                object.__setattr__(self, "_args", tuple([self._args]))
+                object.__setattr__(self, "_values", tuple([self._values]))
     
     def __hash__(self) -> int:
-        args_hashable = []
-        for arg in self._args:
-            arg_dict = type(arg).__dict__
+        values_hashable = []
+        for value in self._values:
+            arg_dict = type(value).__dict__
             if arg_dict.get("__hash__"):
-                args_hashable.append(arg)
-            elif isinstance(arg, (List, Dict, Set)):
-                args_hashable.append(repr(arg))
+                values_hashable.append(value)
+            elif isinstance(value, (List, Dict, Set)):
+                values_hashable.append(repr(value))
             else:
-                raise TypeError(f"Unhashable type: {type(arg)}")
-        args_tuple: tuple = tuple(args_hashable)
+                raise TypeError(f"Unhashable type: {type(value)}")
+        values_tuple: tuple = tuple(values_hashable)
 
-        return hash((self.name, args_tuple, self.group))
+        return hash((self.name, values_tuple, self.group))
 
     def __str__(self) -> str:
         if self.group == DEFAULT_GROUP:
-            s = f"Percept{self.name,self._args,self.source}"
+            s = f"Percept{self.name,self._values,self.source}"
         else:
-            s = f"Percept{self.name,self._args,self.group,self.source}"
+            s = f"Percept{self.name,self._values,self.group,self.source}"
         return s.replace("typing.Any","Any")
     
     def __repr__(self):
@@ -150,6 +151,10 @@ class EnvironmentMultiton(type):
         return cls._instances[_my_name]
 
 class Environment(metaclass=EnvironmentMultiton):
+    """Used for the modelling of the Environments in which Agents act and perceive.
+    
+    Each instance with a unique name is a distinct Environment.
+    """
     def __init__(self, env_name: Optional[str]=None, full_log: bool=False):
         self.my_name = env_name if env_name else type(self).__name__
         self.show_exec = full_log
@@ -183,6 +188,7 @@ class Environment(metaclass=EnvironmentMultiton):
         self.logger.info(f"Environment {self.my_name} created", extra=self.env_info)
     
     def print(self,*args, **kwargs):
+        """Formatted MASPY Print Function"""
         if not self.printing:
             return 
         f_args = "".join(map(str, args))
@@ -192,7 +198,7 @@ class Environment(metaclass=EnvironmentMultiton):
     
     @property
     def get_info(self):
-        percepts = self.perception()
+        percepts = self._perception()
         percept_list = []
         for group_keys in percepts.values():
             for percept_set in group_keys.values():
@@ -201,7 +207,7 @@ class Environment(metaclass=EnvironmentMultiton):
                     
         return {"percepts": percept_list, "connected_agents": list(self._agents.keys()).copy()}
     
-    def perception(self) -> Dict[str, Dict[str, Set[Percept]]]:
+    def _perception(self) -> Dict[str, Dict[str, Set[Percept]]]:
         with self.lock:
             self.perceiving_agents += 1
         percepts = manual_deepcopy(self._percepts)
@@ -211,12 +217,15 @@ class Environment(metaclass=EnvironmentMultiton):
 
     @property
     def print_percepts(self):
+        """
+        Prints all the environment's current percepts
+        """
         percepts = ""
         for group_keys in self._percepts.values():
             for percept_set in group_keys.values():
                 for percept in percept_set:
-                    percepts += f"\t{percept}\n"
-        print(f"{percepts}\r")
+                    percepts += f"\n\t{percept}"
+        self.print(f"{percepts}\r")
         
     @property
     def print_actions(self):
@@ -239,7 +248,7 @@ class Environment(metaclass=EnvironmentMultiton):
         caller_frame = frame.f_back.f_back 
         caller_method = caller_frame.f_code.co_name
         args, _, _, values = inspect.getargvalues(caller_frame)
-        args_s = "".join(f'{arg}={values[arg]}' for arg in args if arg != "self")
+        args_s = ", ".join(f'{arg}={values[arg]}' for arg in args if arg != "self")
         return caller_method, args_s
     
     def add_agents(self, agents: Union[List['Agent'],'Agent']):
@@ -264,7 +273,9 @@ class Environment(metaclass=EnvironmentMultiton):
         
         if hasattr(self, 'on_connect'):
             getattr(self, 'on_connect')(ag_name)
-        self.logger.info(f'Connecting Agent {type(agent).__name__}:{agent.my_name}', extra=self.env_info)
+        if self.show_exec:
+            self.print(f'Connecting Agent {type(agent).__name__}:{"_".join(str(x) for x in agent.tuple_name)}')
+        self.logger.info(f'Connecting Agent {type(agent).__name__}:{"_".join(str(x) for x in agent.tuple_name)}', extra=self.env_info)
     
     def _rm_agents(
         self, agents: Union[Iterable['Agent'], 'Agent']
@@ -283,48 +294,63 @@ class Environment(metaclass=EnvironmentMultiton):
             assert isinstance(agent.tuple_name, tuple)
             del self._agents[ag_name]
             self.agent_list[type(agent).__name__][agent.tuple_name[0]].remove(ag_name)
-        self.logger.info(f'Disconnecting Agent {type(agent).__name__}:{agent.my_name}', extra=self.env_info)
+        if self.show_exec:
+            self.print(f'Disconnecting Agent {type(agent).__name__}:{"_".join(str(x) for x in agent.tuple_name)}')
+        self.logger.info(f'Disconnecting Agent {type(agent).__name__}:{"_".join(str(x) for x in agent.tuple_name)}', extra=self.env_info)
     
     def create(self, percept: List[Percept] | Percept):
+        """
+        Creates one or multiple new percept(s) on the environment
+
+        Parameters
+        ----------
+            percept : List of Percepts or Percept 
+                The one or multiple Percepts to be added to the environment.
+        """
         percept_dict = self._clean(percept)
         with self.lock:
             aux_percepts = manual_deepcopy(self._percepts)
         merge_dicts(percept_dict, aux_percepts)
         with self.lock:
             self._percepts = aux_percepts
-        action, agt = self._check_caller()
-        extras = self.env_info
-        extras.update({"new_percept(s)": percept, "action":action, "agent": agt})
-        self.logger.info('Creating Percept', extra=extras)
         
         if isinstance(percept, list):
             for prcpt in percept:
                 if prcpt.group in Group:
                     self._add_state(prcpt)
         elif percept.group in Group._member_names_:
-            self._add_state(percept)
+            self._add_state(percept)    
+        
+        action, agt = self._check_caller()
+        extras = self.env_info
+        extras.update({"percept(s)": str(percept), "action":action, "agent": agt})
+        if self.show_exec:
+            self.print(f'Creating {percept}')
+        self.logger.info('Creating Percept', extra=extras)
+        
+        
     
     def _add_state(self, percept: Percept):
         self._state_percepts[percept.name] = percept
         match percept.group:
             case "listed":
-                states = percept.args
+                states = percept.values
             case "combination":
-                if percept.args_len == 2 and isinstance(percept.args[0], Sequence) and isinstance(percept.args[1], int):
-                    comb = list(combinations(percept.args[0], percept.args[1]))
+                if percept.values_len == 2 and isinstance(percept.values[0], Sequence) and isinstance(percept.values[1], int):
+                    comb = list(combinations(percept.values[0], percept.values[1]))
                 else:
                     comb = []
-                    for i in range(1, len(percept.args) + 1):
-                        comb.extend(combinations(percept.args, i))
+                    for i in range(1, len(percept.values) + 1):
+                        comb.extend(combinations(percept.values, i))
                 states = comb
             case "permutation":
                 perm: list = []
-                for i in range(1, len(percept.args) + 1):
-                    perm.extend(permutations(percept.args, i))
+                for i in range(1, len(percept.values) + 1):
+                    perm.extend(permutations(percept.values, i))
                 states = perm
             case "cartesian":
                 ranges: list = []
-                for arg in percept._args:
+                for arg in percept._values:
                     if isinstance(arg, str):
                         ranges.append([arg])
                     elif isinstance(arg, Sequence):
@@ -340,13 +366,33 @@ class Environment(metaclass=EnvironmentMultiton):
         else: 
             self._states[percept.name] = states
                         
-    def get(self, percept:Percept, all=False, ck_group=False, ck_args=True) -> List[Percept] | Percept | None:
+    def get(self, percept:Percept, all=False, ck_group=False, ck_values=True) -> List[Percept] | Percept | None:
+        """
+        Retrieves from the environment one or multiple percepts that match the given parameters
+
+        Parameters
+        ----------
+            percept: Percept
+                The percept to search for.
+            all (bool, optional) 
+                If True, returns all matching percepts. Defaults to False.
+            ck_group (bool, optional)
+                Whether to check the group of the percept. Defaults to False.
+            ck_values (bool, optional)
+                Whether to check the arguments of the percept. Defaults to True.
+
+        Returns
+        -------
+            List ofPercept] | Percept:  
+                The retrieved percept(s).
+            None: If no matches are found, returns None.
+        """
         found_data = []
         ## self.logger.debug(f'Getting percept like: {percept}', extra=self.env_info)
         for group_keys in self._percepts.values():
             for percept_set in group_keys.values():
                 for prcpt in percept_set:
-                    if self._compare_data(prcpt,percept,ck_group,ck_args):
+                    if self._compare_data(prcpt,percept,ck_group,ck_values):
                         if not all:
                             return prcpt
                         else:
@@ -374,32 +420,42 @@ class Environment(metaclass=EnvironmentMultiton):
             return False
         if not ck_args:
             return True
-        if data1.args_len != data2.args_len:
+        if data1.values_len != data2.values_len:
             self.print("Failed at args_len") if self.show_exec else ...
             return False
-        for arg1,arg2 in zip(data1._args,data2._args):
+        for arg1,arg2 in zip(data1._values,data2._values):
             if arg1 is Any or arg2 is Any or arg1 == arg2:
                 continue
             else:
-                self.print(f"Failed at args {arg1} x {arg2}") if self.show_exec else ...
+                self.print(f"Failed at values {arg1} x {arg2}") if self.show_exec else ...
                 return False
         else:
             self.print("Data is Compatible") if self.show_exec else ...
             return True
     
-    def change(self, old_percept:Percept, new_args:tuple | Any):
-        if type(new_args) is not tuple: 
-            new_args = (new_args,) 
-        if old_percept.args_len > 0:
+    def change(self, old_percept:Percept, new_values:tuple | Any):
+        """
+        Changes the values of a percept
+
+        Parameters
+        ----------
+            old_percept : Percept
+                The percept to be changed.
+            new_values : (tuple | Any)
+                The new arguments for the old percept
+        """
+        if type(new_values) is not tuple: 
+            new_values = (new_values,) 
+        if old_percept.values_len > 0:
             percept = self.get(old_percept)
         else:
-            percept = self.get(old_percept,ck_args=False)
+            percept = self.get(old_percept,ck_values=False)
             
         assert isinstance(percept, Percept)
-        aux_percept = percept.args
+        aux_percept = percept.values
         with self.lock:
             if isinstance(percept, Percept):
-                percept._args = new_args
+                percept._values = new_values
                 
         assert isinstance(percept, Percept)        
         if percept.name in self._state_percepts:
@@ -408,7 +464,12 @@ class Environment(metaclass=EnvironmentMultiton):
         if percept.group in Group._member_names_:
             self._add_state(percept)
         action, agt = self._check_caller()
-        self.logger.info(f"Changing Percept('{percept.name}', ('{aux_percept}',), '{percept.source}') to {percept}", extra=self.env_info.update({"action":action, "agent": agt}))
+        extras = self.env_info
+        info = {"old_percept": f"Percept('{percept.name}', ('{aux_percept}',), '{percept.source}')", "new_percept": str(percept), "action":action, "agent": agt}
+        extras.update(info)
+        if self.show_exec:
+            self.print(f"Changing Percept('{percept.name}', ('{aux_percept}',), '{percept.source}') to {percept}")
+        self.logger.info(f"Changing Percept", extra=extras)
             
     def _percept_exists(self, key, args, group=DEFAULT_GROUP) -> bool:
         if type(args) is not tuple: 
@@ -416,6 +477,14 @@ class Environment(metaclass=EnvironmentMultiton):
         return Percept(key,args,group) in self._percepts[group][key]
 
     def delete(self, percept: List[Percept] | Percept):
+        """
+        Deletes one or multiple percepts from the environment
+
+        Parameters
+        ----------
+            percept : List of Percepts or Percept)
+                The one or multiple Percepts to be deleted from the environment
+        """
         self.print(self._check_caller())
         assert percept is not None, f'Percept given to be deleted is None'
         try:
@@ -425,7 +494,11 @@ class Environment(metaclass=EnvironmentMultiton):
             else:
                 self._percepts[percept.group][percept.name].remove(percept)
             action, agt = self._check_caller()
-            self.logger.info(f'Deleting {percept}', extra=self.env_info.update({"action":action, "agent": agt}))
+            extra = self.env_info
+            extra.update({"percept(s)": str(percept), "action":action, "agent": agt})
+            if self.show_exec:
+                self.print(f'Deleting {percept}')
+            self.logger.info(f'Deleting Percept', extra=extra)
         except KeyError:
             self.logger.warning(f'{percept} doesnt exist, cannot be deleted',extra=self.env_info)
               

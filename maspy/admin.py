@@ -18,9 +18,7 @@ import atexit
 import os
 import sys, queue
 
-# CHANGE TIMESTAMP to SYSTEMTIME 
-
-MASPY_VERSION = "2025.10.31"
+MASPY_VERSION = "2025.11.09"
 
 TAgent = TypeVar('TAgent', bound=Agent)
 TEnv = TypeVar('TEnv', bound=Environment)
@@ -99,12 +97,13 @@ class AdminMeta(type):
         cls._instances = super().__call__(*args, **kwargs)
         return cls._instances[cls]
     
-class Admin(metaclass=AdminMeta):    
+class Admin(metaclass=AdminMeta):
+    """Administrator Singleton Class in charge of configuration, exectution, debugging and logging of the MASPY program."""   
     def __init__(self:'Admin', all_log= False, console_log=False, file_log=False, listener_log=False) -> None:
         self.print_queue: queue.Queue = queue.Queue()
         self.logger = logging.getLogger("maspy")
         self.sys_settings()
-        signal.signal(signal.SIGINT, self.stop_all_agents)
+        signal.signal(signal.SIGINT, self.stop_system)
         self.logging = False
         self.end_of_execution = False
         self._name = f"# {type(self).__name__} #"
@@ -185,6 +184,7 @@ class Admin(metaclass=AdminMeta):
         type(self)._instances = {}
     
     def print(self,*args, **kwargs):
+        """Formatted MASPY Print Function"""
         f_args = "".join(map(str, args))
         f_kwargs = "".join(f"{key}={value}" for key, value in kwargs.items())
         self.print_queue.put(f"{bcolors.GOLD}{self._name}> {f_args}{f_kwargs}{bcolors.ENDCOLOR}")
@@ -234,7 +234,7 @@ class Admin(metaclass=AdminMeta):
             agent.tcolor = color
 
         self.print(
-            f"Registering Agent {type(agent).__name__}:{agent.tuple_name}"
+            f"Registering Agent {type(agent).__name__}:{"_".join(str(x) for x in agent.tuple_name)}"
         ) if self.show_exec else ...
 
     def rm_agents(
@@ -253,7 +253,7 @@ class Admin(metaclass=AdminMeta):
             del self._agents[agent.tuple_name]
             del self._agent_list[agent.tuple_name]
         self.print(
-            f"Removing agent {type(agent).__name__}:{agent.tuple_name} from List"
+            f"Removing Agent {type(agent).__name__}:{"_".join(str(x) for x in agent.tuple_name)} from System List"
         ) if self.show_exec else ...
 
     def _add_channel(self, channel: Channel) -> None:
@@ -310,7 +310,8 @@ class Admin(metaclass=AdminMeta):
             return 0.000000
         return round(time() - self.start_time,6)
 
-    def start_system(self:'Admin', end_if_idle: int | bool = False) -> None:
+    def start_system(self:'Admin') -> None:
+        """Starts the system. This function will block until the system is finished."""
         no_agents = True
         #for model in self._models.values():
         #    model.reset_percepts()
@@ -345,7 +346,7 @@ class Admin(metaclass=AdminMeta):
                     self.print_running_number()
                 sleep(self.cycle_speed)
             
-            self.stop_all_agents()
+            self.stop_system()
             self.sys_running = False
             self.print_queue.put(None)   # send stop signal
             pb_thread.join()
@@ -442,7 +443,7 @@ class Admin(metaclass=AdminMeta):
         except KeyError:
             self.print(f"'Agent' {agent_name} not connected")
       
-    def stop_all_agents(self,sig=None,frame=None):
+    def stop_system(self,sig=None,frame=None):
         self.logger.info("Ending MASPY Program", extra={"class_name": "Admin", "my_name": ""})
         if self._report_lock:
             return
