@@ -43,7 +43,7 @@ The project still has some rough edges that should be considered.
 
 - The framework API will probably have a decent amount of breaking changes
 in the future.
-- There is no support to run a `MASPY`` system in a distributed setting.
+- There is no support to run a ``MASPY`` system in a distributed setting.
 - The system performance still unmeasured, altough running a toy system 
 with over thousands of agents was possible.
 
