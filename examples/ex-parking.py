@@ -14,7 +14,7 @@ class Parking(Environment):
         spot = self.get(Percept("spot",(spot_id,"free")))
         self.print(f"Driver {agt} parking on spot({spot_id})")
         if spot:
-            self.change(spot,(spot_id,[agt]))
+            self.change(spot, values=(spot_id,[agt]))
             return True
         else:
             self.print(f"Requested spot({spot_id}) unavailable")
@@ -24,7 +24,7 @@ class Parking(Environment):
         spot = self.get(Percept("spot",(Any,[agt])))
         if spot:
             self.print(f"Driver {agt} leaving spot({spot.values[0]})")
-            self.change(spot,(spot.values[0],"free"))
+            self.change(spot, values=(spot.values[0],"free"))
         else:
             self.print(f"Driver {agt} not found in any spot")
 
