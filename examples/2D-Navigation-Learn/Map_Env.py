@@ -32,7 +32,7 @@ def generate_map_with_walls(width, height, target, wall_prob=0.1, max_attempts=2
     raise RuntimeError("Failed to generate a valid map.")
 
 class Map(Environment):
-    def __init__(self, map_size, walls_prob):
+    def __init__(self, map_size=(10, 10), walls_prob=0.1):
         super().__init__()
         self.moves = {
             "up": (0, -1),"down": (0, 1), 
@@ -48,15 +48,24 @@ class Map(Environment):
             self.create(Percept("wall", wall))
         self.create(Percept("position", positions[1], listed))
         self.possible_starts = "off-policy"
-        
+    
+    def reset_positions(self, og_pos):
+        found_pos = self.get(Percept("arrived_target", (Any, Any)), all=True)
+        assert isinstance(found_pos, list)
+        self.delete(found_pos)
+        new_pos_prcpts = self.get(Percept("agt_position", (Any, Any)), all=True)
+        assert isinstance(new_pos_prcpts, list)
+        for pos_prcpt in new_pos_prcpts:
+            pos_prcpt.change(values=og_pos[pos_prcpt.group])
+
     def on_connect(self, agt):
-        target = self.has(Percept("target", (Any,Any))).values
+        target = self.get(Percept("target", (Any,Any))).values
         while True:
             start_pos = (randint(0, self.map_size[0]-1), randint(0, self.map_size[1]-1))
             if not self.has(Percept("wall", start_pos)) and (abs(start_pos[0] - target[0]) + abs(start_pos[1] - target[1])) > self.map_size[0]/2:
                 break
         self.create(Percept("agt_position", start_pos, agt))
-        self.print(f"Agent {agt} starts at {start_pos}")
+        #print(f"MAP> Agent {agt} starts at {start_pos}")
     
     def moviment(self, position, direction):
         dx, dy = self.moves[direction]

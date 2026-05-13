@@ -1,6 +1,7 @@
 from maspy import *
 from maspy.learning import *
 from collections import deque
+from random import choice
 import heapq
 
 def draw_ascii_map(graph, walls=None, target=None):
@@ -136,16 +137,21 @@ class Walker(Agent):
     def __init__(self, name, map: Environment, episodes: int):
         super().__init__(name, max_intentions=1)
         self.filter_perceptions(add, focus, self.my_name)
-
-        model = EnvModel(map, self)
+        #self.show_slct = True
+        #self.show_cycle = True
+        model = EnvModel(map, self, True)
         self.add_policy(model)
         state = model.env.get(Percept("agt_position", (Any, Any), self.my_name), ck_group=True)
         assert isinstance(state, Percept)
         model.initial_states = {"position": [state.values]}
-        print(f"Agent {self.my_name} starts at {state.values}")
+        #print(f"Agent {self.my_name} starts at {state.values}")
         model.learn(qlearning, num_episodes=episodes)
-        
+        self.reset_knowledge()
+    
+    def reset_knowledge(self):
+        self.rm(Belief("Path_Graph", Any))
         self.add(Belief("Path_Graph", dict()))
+        self.rm(Belief("Wall_Set", Any))
         self.add(Belief("Wall_Set", []))
         self.add(Goal("move"))
     
@@ -153,19 +159,24 @@ class Walker(Agent):
         map_graph = self.get(Belief("Path_Graph", Any))
         wall_list = self.get(Belief("Wall_Set", Any))
         new_pos = self.get(Belief("agt_position", (Any,Any), "Map"))
+        assert (map_graph and wall_list and new_pos), f"{map_graph} | {wall_list} | {new_pos}"
         if new_pos.values not in map_graph.values:
-            map_graph.values.setdefault(position, set()).add(new_pos.values)
-            map_graph.values.setdefault(new_pos.values, set()).add(position)
-            self.send(broadcast, tell, Belief("Sent_Graph", map_graph.values.copy()))
+            old_graph = map_graph.values
+            old_graph.setdefault(position, set()).add(new_pos.values)
+            old_graph.setdefault(new_pos.values, set()).add(position)
+            map_graph.change(values=old_graph)
+            self.send(broadcast, tell, Belief("Sent_Graph", old_graph))
         if new_pos.values == position and direction != "stay":
             match direction:
                 case "up": wall_pos = (position[0],position[1]-1)
                 case "down": wall_pos = (position[0],position[1]+1)
                 case "left": wall_pos = (position[0]-1,position[1])
                 case "right": wall_pos = (position[0]+1,position[1])
-            if wall_pos not in wall_list.values:
-                wall_list.values.append(wall_pos)
-                self.send(broadcast, tell, Belief("Sent_Walls", wall_list.values.copy()))
+            walls = wall_list.values
+            if wall_pos not in walls:
+                walls.append(wall_pos)
+                self.print(f"Driver {self.my_name} found a wall at {wall_pos} added to {walls}")
+                self.send(broadcast, tell, Belief("Sent_Walls", walls))
 
     @pl(gain, Goal("move"), Belief("target", (Any,Any)) & Belief("agt_position", (Any,Any), "Map"))
     def best_move(self, src, target, position):
@@ -179,13 +190,17 @@ class Walker(Agent):
         if not self.has(Belief("arrived_target", (Any,Any), "Map")):
             return False # Retries current event
         else:
-            print(f"Driver {self.my_name} arrived at {target}")
+            self.print(f"Driver {self.my_name} arrived at {target}")
             self.stop_cycle()
             
     @pl(gain, Goal("move"), Belief("agt_position", (Any,Any), "Map"))
     def make_move(self, src, position):
-        direction, _ = self.get_best_action("Map",(position,))
-        self.print(f"From {position} Moving on a Learned Direction ({direction})")
+        if self.has(Belief("use_learn")):
+            direction, _ = self.get_best_action("Map",(position,))
+            self.print(f"From {position} Moving on a Learned Direction ({direction})")
+        else:
+            direction = choice(["up", "down", "left", "right"])
+            self.print(f"From {position} Moving on a Random Direction ({direction})")
         self.move(direction) # Move Action
 
         self.perceive("Map") # Manual Perception of Map
@@ -203,13 +218,18 @@ class Walker(Agent):
     @pl(gain, Belief("Sent_Graph", Any), plan_type=atomic)
     def update_graph(self, src, sent_graph):
         map_graph = self.get(Belief("Path_Graph", Any))
+        old_graph = map_graph.values
         for node, neighbors in sent_graph.items():
-            if node not in map_graph.values:
-                map_graph.values[node] = set(neighbors)
+            if node not in old_graph:
+                old_graph[node] = set(neighbors)
             else:
-                map_graph.values[node] |= neighbors
+                old_graph[node] |= neighbors
+        map_graph.change(values=old_graph)
     
     @pl(gain, Belief("Sent_Walls", Any), plan_type=atomic)
     def update_walls(self, src, sent_graph):
         wall_set = self.get(Belief("Wall_Set", Any))
-        wall_set.values.append(sent_graph[0])
+        old_set = wall_set.values
+        if sent_graph[0] not in old_set:
+            old_set.append(sent_graph[0])
+            wall_set.change(values=old_set)

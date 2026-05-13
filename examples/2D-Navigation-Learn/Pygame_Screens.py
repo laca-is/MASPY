@@ -114,8 +114,8 @@ class MapVisualizer:
         x = self.env.map_size[0]*self.cell_size + 20
         y = 40
         spacing = 60
-        actions = [self.action_1, self.action_2, self.action_3, self.action_4]
-        names = ["Pause/Resume", "More Delay", "Less Delay", "Reset"]
+        actions = [self.action_1, self.action_2, self.action_3]
+        names = ["Pause/Resume", "More Delay", "Less Delay"]
         for i, func in enumerate(actions):
             btn = Button(
                 rect=(x, y + i*spacing, SIDEBAR_WIDTH-40, 40),
@@ -128,9 +128,6 @@ class MapVisualizer:
     def action_1(self): Admin().pause_system()
     def action_2(self): Admin().slower_cycle()
     def action_3(self): Admin().faster_cycle()
-    def action_4(self): Admin()._models[0].reset_percepts()
-    def action_5(self): print("Action 5 triggered")
-    def action_6(self): print("Action 6 triggered")
     
     def draw_sidebar(self):
         sidebar_rect = pygame.Rect(self.env.map_size[0]*self.cell_size, 0, SIDEBAR_WIDTH, self.env.map_size[1]*self.cell_size)
@@ -158,11 +155,12 @@ class MapVisualizer:
                             (cx + 4, cy + self.cell_size - 4), 3)
             
         # draw walls
-        walls = self.env.get(Percept("wall", (Any, Any)), all=True)
-        if not walls: walls = []
-        for wall in walls:
-            rect = pygame.Rect(wall.values[0] * self.cell_size, wall.values[1] * self.cell_size, self.cell_size, self.cell_size)
-            pygame.draw.rect(self.screen, (0, 0, 0), rect)
+        if self.env.has(Percept("wall", (Any, Any))):
+            walls = self.env.get(Percept("wall", (Any, Any)), all=True)
+            if not walls: walls = []
+            for wall in walls:
+                rect = pygame.Rect(wall.values[0] * self.cell_size, wall.values[1] * self.cell_size, self.cell_size, self.cell_size)
+                pygame.draw.rect(self.screen, (0, 0, 0), rect)
 
         # draw agents
         for percept in self.env.get(Percept("agt_position", (Any, Any)), all=True):
@@ -236,7 +234,7 @@ class MapVisualizer:
         
 class MenuScreen:
     def __init__(self):
-        self.screen = pygame.display.set_mode((500, 400))
+        self.screen = pygame.display.set_mode((400, 400))
         pygame.display.set_caption("Simulation Setup")
         self.clock = pygame.time.Clock()
         self.inputs = [
