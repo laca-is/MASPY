@@ -14,7 +14,8 @@ class Cruzamento(Environment):
     
     def esperar(self, src):
         self.print(f"agente {src} aguardando")
-        self.change(Percept("cruzamento"),"livre")
+        crz_percept = self.get(Percept("cruzamento", Any))
+        crz_percept.change(values="livre")
 
 class VA(Agent):
     def __init__(self, agt_name):
