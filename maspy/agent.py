@@ -10,17 +10,22 @@ from maspy.error import (
     InvalidPlanError,
     RunPlanError,
 )
-from maspy.utils import set_changes, merge_dicts, manual_deepcopy, fill_anys, bcolors, Condition
+from maspy.utils import set_changes, merge_dicts, manual_deepcopy, freeze_obj, unfreeze_obj, bcolors, Condition
 from typing import List, Optional, Dict, Set, Any, Union, Type, cast, _SpecialForm, TypeGuard, TypeVar, TYPE_CHECKING
-from collections.abc import Iterable, Callable, Sequence
+from collections.abc import Iterable, Callable, Sequence, Mapping
 from collections import deque
 from time import sleep
 from enum import Enum
 from importlib import import_module
 from traceback import extract_tb
 from contextlib import nullcontext
+from functools import reduce
+from operator import and_
 import inspect
 import sys
+
+from concurrent.futures import ThreadPoolExecutor
+import cProfile, pstats, io
 
 Event_Change = Enum('gain | lose | test | success | failure', ['gain', 'lose', 'test', 'success', 'failure']) # type: ignore[misc]
 
@@ -48,6 +53,7 @@ atomic = Plan_Type.atomic
 DEFAULT_SOURCE = "self"
 DEFAULT_CHANNEL = "default"
 PENDING_TIMER = 20
+PRINT_CHECKS = False
 
 @dataclass(eq=True, frozen=True)
 class Belief(Condition):
@@ -55,6 +61,7 @@ class Belief(Condition):
     _values: tuple | Any = field(default_factory=tuple)
     source: str = DEFAULT_SOURCE
     adds_event: bool = True
+    v_len: int = 0
 
     @property
     def values(self):
@@ -68,10 +75,20 @@ class Belief(Condition):
     @property
     def values_len(self):
         return len(self._values)
+    
+    @property
+    def info(self) -> dict:
+        return {
+            "data_type": "Belief",
+            "name": self.name,
+            "values": self._values,
+            "source": self.source
+        }
 
     def __post_init__(self):
         if not isinstance(self.name, str): raise TypeError(f"Belief.name[ {self.name} ] is not a string")
         if not isinstance(self.source, str): raise TypeError(f"Belief.source[ {self.source} ] is not a string")
+        object.__setattr__(self, "v_len", len(self._values) if isinstance(self._values, tuple) else 1)
         match self._values:
             case list() | dict() | str():
                 object.__setattr__(self, "_values", tuple([self._values]))
@@ -132,6 +149,7 @@ class Goal(Condition):
     name: str = field(default_factory=str)
     _values: tuple | Any = field(default_factory=tuple)
     source: str = DEFAULT_SOURCE
+    v_len: int = 0
 
     @property
     def values(self):
@@ -146,9 +164,19 @@ class Goal(Condition):
     def values_len(self):
         return len(self._values)
 
+    @property
+    def info(self) -> dict:
+        return {
+            "data_type": "Goal",
+            "name": self.name,
+            "values": self._values,
+            "source": self.source
+        }
+
     def __post_init__(self):
         if not isinstance(self.name, str): raise TypeError(f"Goal.name[ {self.name} ] is not a string")
         if not isinstance(self.source, str): raise TypeError(f"Goal.source[ {self.source} ] is not a string")
+        object.__setattr__(self, "v_len", len(self._values) if isinstance(self._values, tuple) else 1)
         match self._values:
             case list() | dict() | str():
                 object.__setattr__(self, "_values", tuple([self._values]))
@@ -205,8 +233,17 @@ class Goal(Condition):
     
 @dataclass
 class Event:
+    """ Events represent a change of the Agent's Information """
     change: Event_Change = field(default_factory=lambda:gain)
-    data: Belief | Goal | Percept = field(default_factory=Belief)
+    data: Belief | Goal | Percept | None = None
+    
+    @property
+    def info(self) -> dict:
+        return {
+            "data_type": "Event",
+            "change": self.change.name,
+            "data": self.data.info if self.data else None
+        }
     
     def __str__(self) -> str:
         return f"{self.change.name}:{self.data}"
@@ -216,12 +253,22 @@ class Event:
     
 @dataclass
 class Plan:
+    """ Plans represent how the Agent will respond to an Event in a given Context """
     trigger: Event = field(default_factory=Event)
-    context: List[tuple[bool, Belief | Goal]] | Condition = field(default_factory=list)
+    context: Optional[Condition] = None
     body: Callable = lambda _: {}
     conditions: tuple[Callable[..., Any], ...] = (lambda _: {},)
     plan_type: Plan_Type = field(default_factory=lambda:default)
     ev_ctrl: threading.Event = threading.Event()
+    
+    @property
+    def info(self) -> dict:
+        return {
+            "data_type": "Plan",
+            "trigger": self.trigger.info,
+            "context": self.context,
+            "body": self.body.__name__
+        }
     
     def __str__(self) -> str:
         return f"Plan( {self.trigger}, {self.context} -> {self.body.__name__}() )"
@@ -240,10 +287,20 @@ class Plan:
     
 @dataclass
 class Ask:
+    """ Asks represent a request for information from the Agent """
     data_type: Belief | Goal
     source: str = "unknown"
     reply_event: threading.Event = threading.Event()
     reply_content: Belief | Goal | Plan | List[Belief | Goal | Plan] | None = None 
+    
+    @property
+    def info(self) -> dict:
+        return {
+            "data_type": "Ask",
+            "data": self.data_type.info,
+            "source": self.source,
+            "reply_content": self.reply_content
+        }
     
     def __str__(self) -> str:
         return f"Ask( {self.data_type}, {self.source}, reply={self.reply_content} )"
@@ -253,9 +310,18 @@ class Ask:
 
 @dataclass
 class Intention:
+    """ Intentions represent how an Agent will execute a Plan to respond to an Event """
     plan: Plan = field(default_factory=Plan)
     event: Event = field(default_factory=Event)
     args: tuple | Any = field(default_factory=tuple)
+    
+    @property
+    def info(self) -> dict:
+        return {
+            "plan": self.plan.info,
+            "event": self.event.info,
+            "args": self.args
+        }
     
     def __str__(self) -> str:
         return f"{self.event} -> {self.plan.body.__name__}() Context={self.plan.context,self.args}"
@@ -263,7 +329,7 @@ class Intention:
     def __repr__(self):
         return self.__str__()
 
-MSG = Belief | Ask | Goal | Plan | List[Belief | Ask | Goal | Plan]
+MSG = Belief | Ask | Goal | Plan | List[Belief | Goal | Plan]
 
 Data_Type = TypeVar("Data_Type", bound=Belief | Goal | Plan | Event)
 
@@ -281,27 +347,17 @@ def pl(change: Event_Change, data: Belief | Goal, context: Belief | Goal | List[
             if not isinstance(data, Belief | Goal):
                 raise TypeError(f"Expected Belief or Goal for Information, got {type(data).__name__}:{data}")
 
-            context_condition: List[tuple[bool, Belief | Goal]] | Condition
+            context_condition: Condition | None
             
             match context:
                 case Condition() if not isinstance(context, Belief | Goal):
                     context_condition = context
                 
                 case Belief() | Goal():
-                    context_condition = [(True,context)]
+                    context_condition = Condition("=", "=", context)
                 
                 case Iterable():
-                    context_condition = []
-                    for ctxt in context:
-                        if isinstance(ctxt, Belief | Goal):
-                            context_condition.append((True,ctxt))
-                        elif isinstance(ctxt, tuple) and len(ctxt) == 2 and isinstance(ctxt[0], bool) and isinstance(ctxt[1], Belief | Goal):
-                            context_condition.append(ctxt)
-                        elif ctxt is False:
-                            context_condition.append(context)
-                            break
-                        else:
-                            raise Exception(f'Invalid type {type(ctxt)}:{ctxt} - was expecting Belief or Goal')
+                    context_condition = reduce(and_, context) if context else None
             
             event = Event(change,data)
             plan = Plan(event,context_condition,self.func,plan_type=plan_type)
@@ -327,7 +383,6 @@ class Agent:
         show_prct = False,
         show_slct = False,
         logging = False,
-        log_type = "Default",
         instant_mail = False,
         read_all_mail = False,
         max_intentions = 5
@@ -336,7 +391,6 @@ class Agent:
         self.show_cycle: bool = show_cycle
         self.show_prct: bool = show_prct
         self.show_slct: bool = show_slct
-        self.log_type: str = log_type
         self.logging = logging
         self.cycle_log: Dict[float, list[Dict[str, Any]]] = dict()
         self.cycle_counter = 0
@@ -358,7 +412,15 @@ class Agent:
         self.stop_flag: threading.Event | None = None
         self.running: bool = False
         self.thread: threading.Thread | None = None
-        
+        self._plan_executor: ThreadPoolExecutor = ThreadPoolExecutor(
+            max_workers=max_intentions, 
+            thread_name_prefix=f"{self.my_name}_plans"
+        )
+        self._msg_executor: ThreadPoolExecutor = ThreadPoolExecutor(
+            max_workers=5,
+            thread_name_prefix=f"{self.my_name}_msgs"
+        )
+                
         self.lock = threading.Lock()
         self.env_lock = threading.Lock()
         self.ch_lock = threading.Lock()
@@ -367,6 +429,9 @@ class Agent:
         self.print_lock = threading.Lock()
         self.msg_lock = threading.Lock()
         self.reply_event: Dict[tuple, threading.Event] = {}
+        self._work_condition: threading.Event = threading.Event()
+        self._has_pending_mail = False
+        self._has_pending_perception = False
         
         self._ml_models: List = []
         self.policies: List = []
@@ -374,6 +439,8 @@ class Agent:
         self._environments: Dict[str, Environment] = dict()
         self._channels: Dict[str, Channel] = dict()
         self._dicts: Dict[str, Union[Dict[str, Environment], Dict[str, Channel]]] = {"environment":self._environments, "channel":self._channels}
+        self._env_changed: Dict[str, bool] = {}
+        self._env_changed_count: int = 0
         
         self._strategies: list[EnvModel] = []
         self.auto_action: bool = False
@@ -404,10 +471,10 @@ class Agent:
         self.relevant_plans: List[Plan] | None = None
         
         if beliefs:
-            self.logger.debug(f"Adding Initial Beliefs: {beliefs}", extra=self.agent_info) if self.logging else ... 
+            if self.logging: self.logger.debug(f"Adding Initial Beliefs: {beliefs}", extra=self.agent_info)
             self.add(beliefs, False)
         if goals: 
-            self.logger.debug(f"Adding Initial Goals: {goals}", extra=self.agent_info) if self.logging else ...
+            if self.logging: self.logger.debug(f"Adding Initial Goals: {goals}", extra=self.agent_info)
             self.add(goals, False)
         
         self._plans: List[Plan]
@@ -416,15 +483,12 @@ class Agent:
                 self._plans = []
         except AttributeError:
             self._plans = []
+        self._plan_index: Dict[tuple, List[Plan]] = {}
+        self._build_plan_index()
 
         self.instant_mail = instant_mail
         self.read_all_mail = read_all_mail
         self.connect_to(Channel())
-        self.paused_agent = False
-
-    # def start(self):
-    #     from maspy.admin import Admin
-    #     Admin().start_agents(self)
     
     def print(self,*args, **kwargs):
         """Formatted MASPY Print Function"""
@@ -435,6 +499,7 @@ class Agent:
         name = self.my_name if not self.unique else self.tuple_name[0]
         msg = f"{self.tcolor}Agent:{name}> {f_args}{f_kwargs}{bcolors.ENDCOLOR}"
         self.print_queue.put(msg)
+        self.logger.info(msg, extra=self.agent_info)
         
     @property
     def print_beliefs(self):
@@ -492,23 +557,29 @@ class Agent:
             "class_name": "Agent",
             "my_name": self.my_name if not self.unique else self.tuple_name[0],
             "cycle": self.cycle_counter,
-            "curr_event": self.curr_event,
-            "aplc_plans": self.relevant_plans,
-            "running_intentions": list(self.__running_intentions.copy()),
+            "curr_event": self.curr_event.info if self.curr_event else None,
+            "aplc_plans": [self.rlv_plans.info for self.rlv_plans in (self.relevant_plans or [])],
+            "running_intentions": [rng_intention.info for rng_intention in self.__running_intentions],
             "num_intentions": self.__running_intentions.__len__(),
-            #"last_recv": self.last_recv,
-            #"last_sent": self.last_sent,
-            "last_intention": self.last_intention,
-            "last_event": self.last_event,   
-            "intentions": list(self.__intentions.copy()),
-            "events": self.__events.copy(),
+            "last_intention": self.last_intention.info if self.last_intention else None,
+            "last_event": self.last_event.info if self.last_event else None,   
+            "intentions": [intention.info for intention in self.__intentions],
+            "events": [event.info for event in self.__events],
             "saved_msgs": list(self.saved_msgs),
-            "beliefs": self.belief_list,
-            "perceptions": self.__perceptions,
-            "goals": self.goal_list,
+            "beliefs": [belief.info for belief in self.belief_list], 
+            "perceptions": [p.info for p_dict in self.__perceptions.values() for p_set in p_dict.values() for p in p_set],
+            "goals": [goal.info for goal in self.goal_list],
             "envs": list(self._environments.keys()), 
             "chs": list(self._channels.keys())
         }
+    
+    def _build_plan_index(self):
+        self._plan_index.clear()
+        for plan in self._plans:
+            key = (plan.trigger.change, type(plan.trigger.data), plan.trigger.data.name)
+            if key not in self._plan_index:
+                self._plan_index[key] = []
+            self._plan_index[key].append(plan)
     
     def filter_perceptions(self, operation: Operation, option: Option, group: List[str] | str):
         """
@@ -537,7 +608,7 @@ class Agent:
             elif operation == Operation.rm and g in self.percept_filter[option_str]:
                 self.percept_filter[option_str].remove(g)
             else:
-                self.logger.warning(f"{g} not in {option_str} filter.", extra=self.agent_info) if self.logging else ...
+                if self.logging: self.logger.warning(f"{g} not in {option_str} filter.", extra=self.agent_info)
     
     def connect_to(self, target: Environment | Channel | str) -> Environment | Channel | None:
         """
@@ -565,7 +636,7 @@ class Agent:
             try:
                 imported = import_module(target)
             except ModuleNotFoundError:
-                self.logger.error(f"No File named '{target}' found", extra=self.agent_info) if self.logging else ...
+                if self.logging: self.logger.error(f"No File named '{target}' found", extra=self.agent_info)
                 self.print(f"No File named '{target}' found")
                 return None
             for name, obj in inspect.getmembers(imported):
@@ -580,6 +651,7 @@ class Agent:
             case Environment():
                 with self.env_lock:
                     self._environments[target.my_name] = target
+                    self._env_changed.update({target.my_name:False})
             case Channel():
                 with self.ch_lock:
                     self._channels[target.my_name] = target
@@ -608,6 +680,7 @@ class Agent:
                 with self.env_lock:
                     target._rm_agent(self)
                     del self._environments[target.my_name]
+                    del self._env_changed[target.my_name]
             case Channel():
                 with self.ch_lock:
                     target._rm_agent(self)
@@ -622,12 +695,24 @@ class Agent:
         policy: EnvModel
             Modelled Environment with the Learning Class
         """
-        self.logger.info(f"Adding model for {policy.name}", extra=self.agent_info) if self.logging else ...
+        if self.logging: self.logger.info(f"Adding model for {policy.name}", extra=self.agent_info)
         self._strategies.append(policy)
         if policy.name not in self._environments.keys():
             self.connect_to(policy.env)
     
     def _new_event(self,change: Event_Change, data: Belief | Goal | Percept | Iterable[Belief | Goal| Percept], instant: bool = False):
+        """ 
+        Creates a new Event and adds it to the Agent
+        
+        Parameters
+        ----------
+        change : Event_Change
+            The type of change (gain | lose | test | success | failure)
+        data : Belief | Goal | Percept | Iterable[Belief | Goal| Percept]
+            The data or information that Changed
+        instant : bool
+            If True, an applicable Plan for this Event is executed instantly [default: False]
+        """
         new_event: Event
         if not isinstance(data, Iterable):
             data = [data]
@@ -641,8 +726,17 @@ class Agent:
             else:
                 self.__events.append(new_event)
                 self._check_event_supended(new_event)
+        self._notify_work()
                         
     def _check_event_supended(self,event: Event):
+        """ 
+        Checks if a supended Intention should be resumed because of a new Event
+        
+        Parameters
+        ----------
+        event : Event
+            The Event to check
+        """
         for intention in self.__supended_intentions:
             if intention[0].event.change == event.change and self._compare_data(intention[0].event.data, event.data, True, True, False):
                 intention[0].plan.ev_ctrl.set()
@@ -650,6 +744,19 @@ class Agent:
     def _get_type_base(self, 
             data_type: Belief | Goal | Plan | Event | Type[Belief | Goal | Plan | Event]
         ) -> tuple[Dict[str, Dict[str, Set[Belief]]], Dict[str, Dict[str, Set[Percept]]]] | Dict[str, Dict[str, Set[Goal]]] | List[Plan] | List[Event] | None:
+        """ 
+        Returns the database for a given type of data (Belief | Goal | Plan | Event)
+        
+        Parameters
+        ----------
+        data_type : Belief | Goal | Plan | Event | Type[Belief | Goal | Plan | Event]
+            The type of data
+        
+        Returns
+        -------
+        tuple[Dict[str, Dict[str, Set[Belief]]], Dict[str, Dict[str, Set[Percept]]]] | Dict[str, Dict[str, Set[Goal]]] | List[Plan] | List[Event] | None
+            The database
+        """
         if isinstance(data_type,Belief) or data_type == Belief:
             return (self.__beliefs, self.__perceptions)
         elif isinstance(data_type,Goal) or data_type == Goal:
@@ -663,6 +770,16 @@ class Agent:
             return None
     
     def update_lists(self, data_type: Belief | Goal, change: str):
+        """ 
+        Updates the lists of Beliefs and Goals
+        
+        Parameters
+        ----------
+        data_type : Belief | Goal
+            The type of data
+        change : str
+            The type of change (add | rm)
+        """
         if change == "add":
             if isinstance(data_type,Belief):
                 self.belief_list.append(data_type)
@@ -674,7 +791,10 @@ class Agent:
             else:
                 self.goal_list.remove(data_type)
     
-    def _check_caller(self):
+    def _check_caller(self) -> str:
+        """ 
+        Returns the name of the method that called the current method
+        """
         stack = inspect.stack(3)
         caller_frame = stack[2]
         caller_method = caller_frame.function
@@ -685,10 +805,12 @@ class Agent:
             return f"Called externally from {type(self).__name__}:{caller_method}"
     
     def _is_type_iter(self, it: Iterable[object] , typ: Type[Data_Type]) -> TypeGuard[Iterable[Data_Type]]:
+        """ 
+        Checks if all elements in an iterable are of a given type
+        """
         return all(isinstance(i, typ) for i in it)  
           
-
-    def add(self, data_type: Belief | Goal | Plan | Iterable[Belief | Goal | Plan], instant: bool = False):
+    def add(self, data_type: Belief | Goal | Plan | Iterable[Belief | Goal | Plan], instant: bool = False, no_lock: bool = False):
         """
         Adds one or more Beliefs, Goals or Plans to the Agent.
 
@@ -699,12 +821,9 @@ class Agent:
         instant : bool, default=False
             If True, an applicable plan with the triggered event is executed immediately
         """
-        #print(f"Add {data_type} | {self._check_caller()}")
-        
         if self.running is False:
             instant = False
-        self.logger.debug(f"Adding Info: {self._format_data("Adding Info", data_type=data_type,instant=instant)}", extra=self.agent_info) if self.logging else ...    
-        # self.save_cycle_log("Adding Info", self._format_data("Adding Info", data_type=data_type,instant=instant))
+        if self.logging: self.logger.debug(f"Adding Info: {self._format_data("Adding Info", data_type=data_type,instant=instant)}", extra=self.agent_info)
         
         if isinstance(data_type, Plan):
             self._plans.append(data_type)
@@ -715,15 +834,16 @@ class Agent:
         
         data_type = cast(Belief | Goal |Iterable[Belief | Goal], data_type)
         cleaned_data = self._clean(data_type)
-        
+        lock = nullcontext() if no_lock else self.update_lock
         for type_data, data in cleaned_data.items():
             if len(data) == 0: 
                 continue
             type_base = self._get_type_base(type_data)
-            if isinstance(type_base,dict):
-                merge_dicts(data,type_base)
-            elif isinstance(type_base,tuple):
-                merge_dicts(data,type_base[0])
+            with lock:
+                if isinstance(type_base,dict):
+                    merge_dicts(data,type_base)
+                elif isinstance(type_base,tuple):
+                    merge_dicts(data,type_base[0])
             
             for src in data.values():
                 for values in src.values():
@@ -732,9 +852,9 @@ class Agent:
                         
         self._new_event(gain,data_type,instant)
     
-    def rm(self, data_type: Belief | Goal | Plan | Iterable[Belief | Goal | Plan], instant: bool = False):
+    def rm(self, data_type: Belief | Goal | Plan | Iterable[Belief | Goal | Plan], instant: bool = False, no_lock: bool=False):
         """
-        Adds one or more Beliefs, Goals or PLans to the Agent.
+        Removes one or more Beliefs, Goals or PLans to the Agent.
 
         Parameters
         ----------
@@ -743,27 +863,41 @@ class Agent:
         instant : bool, default=False
             If True, an applicable plan with the triggered event is executed immediately
         """
-        #print(f"Rm {data_type} | {self._check_caller()}")
         if self.running is False:
             instant = False
-        self.logger.debug(f"Removing Info: {self._format_data("Removing Info", data_type=data_type,instant=instant)}", extra=self.agent_info) if self.logging else ...
-        # self.save_cycle_log("Removing Info",self._format_data("Removing Info", data_type=data_type,instant=instant))  
+        if self.logging: self.logger.debug(f"Removing Info: {self._format_data("Removing Info", data_type=data_type,instant=instant)}", extra=self.agent_info)
         
         if not isinstance(data_type, Iterable): 
             data_type = [data_type]
-            
+        lock = nullcontext() if no_lock else self.update_lock
         for typ in data_type:
-            if isinstance(typ, Belief):
-                self.__beliefs[typ.source][typ.name].remove(typ)
-            elif isinstance(typ, Goal):
-                self.__goals[typ.source][typ.name].remove(typ)
-            elif isinstance(typ, Plan):
-                self._plans.remove(typ)
-            else:
-                self.logger.warning(f"Data_Type {typ} is neither Belief or Goal", extra=self.agent_info) if self.logging else ...
-                self.print(f"Data_Type {typ} is neither Belief or Goal")
+            found_typ = self.get(typ)
+            if found_typ is None:
+                if self.logging: self.logger.warning(f"Data_Type {typ} is not available to be removed", extra=self.agent_info)
+                self.print(f"Data_Type {typ} is not available to be removed")
+                continue
+            assert not isinstance(found_typ, Event | list), f"Data_Type {found_typ} is not a Belief, Goal or Plan"
+            typ = found_typ
+            with lock:
+                if isinstance(typ, Belief):
+                    a = self.__beliefs[typ.source]
+                    b = a[typ.name]
+                    if len(b) == 1:
+                        del a[typ.name]
+                    else:
+                        b.remove(typ)
+                elif isinstance(typ, Goal):
+                    c = self.__goals[typ.source]
+                    d = c[typ.name]
+                    d.remove(typ)
+                elif isinstance(typ, Plan):
+                    self._plans.remove(typ)
+                else:
+                    if self.logging: self.logger.warning(f"Data_Type {typ} is neither Belief, Goal or Plan", extra=self.agent_info)
+                    self.print(f"Data_Type {typ} is neither Belief, Goal or Plan")
             if not isinstance(typ, Plan):
                 self.update_lists(typ,"rm")
+
                 
         if self._is_type_iter(data_type, Belief) or self._is_type_iter(data_type, Goal):
             self._new_event(lose,data_type,instant)
@@ -781,8 +915,7 @@ class Agent:
         """
         if self.running is False:
             instant = False
-        self.logger.debug(f"Testing Info: {self._format_data("Testing Info", data_type=data_type,instant=instant)}", extra=self.agent_info) if self.logging else ...    
-        # self.save_cycle_log("Testing Info",self._format_data("Testing Info", data_type=data_type,instant=instant)) 
+        if self.logging: self.logger.debug(f"Testing Info: {self._format_data("Testing Info", data_type=data_type,instant=instant)}", extra=self.agent_info)
         self._new_event(test,data_type,instant)
     
     def has(self, data_type: Belief | Goal | Plan | Event) -> bool:
@@ -796,11 +929,23 @@ class Agent:
         Returns:
             bool: True if it has, False if not
         """
+        if isinstance(data_type, Belief):
+            if data_type.source != "self":
+                return self.get(data_type) is not None
+            try:
+                return data_type in self.__beliefs[data_type.source][data_type.name]
+            except KeyError:
+                return False
+        elif isinstance(data_type, Goal):
+            try:
+                return data_type in self.__goals[data_type.source][data_type.name]
+            except KeyError:
+                return False
         return self.get(data_type) is not None
 
     def get(self, data_type: Belief | Goal | Plan | Event | Type[Belief | Goal | Plan | Event],
         search_with:  Optional[Belief | Goal | Plan | Event] = None,
-        all = False, ck_chng=True, ck_type=True, ck_values=True, ck_src=True, no_lock=False
+        all: bool = False, ck_chng: bool = True, ck_type: bool = True, ck_values: bool = True, ck_src: bool=True, no_lock: bool=False
     ) -> Belief | Goal | Plan | Event | List[Belief | Goal | Plan | Event] | None:
         """
         Retrieves specific data from the agent's knowledge on the given data_type and search parameters
@@ -837,6 +982,7 @@ class Agent:
             search_with = data_type
 
         change, data = self._to_belief_goal(search_with)
+        if data is None: return None
         
         lock = nullcontext() if no_lock else self.update_lock
         found_data: List[Belief | Goal | Plan | Event] = []
@@ -844,7 +990,7 @@ class Agent:
             case Belief() | Goal() | Percept():  
                 if isinstance(type_base, tuple):
                     for base in type_base:
-                        with self.lock:
+                        with lock:
                             found = self._search(base, data, ck_type, ck_values, ck_src, all)
                         if all:
                             found_data.extend(found)
@@ -861,6 +1007,7 @@ class Agent:
                 for plan_event in type_base:
                     assert isinstance(plan_event, Plan | Event)
                     chng, belf_goal = self._to_belief_goal(plan_event)
+                    if belf_goal is None: continue
                     
                     if change and ck_chng and chng != change:
                         continue
@@ -878,7 +1025,7 @@ class Agent:
             caller_frame = current_frame.f_back
             assert caller_frame is not None
             caller_function_name = caller_frame.f_code.co_name
-            if caller_function_name in {'_retrieve_plans','recieve_msg','_retrieve_context','_select_plan','has','_check', '_format_check'}:
+            if caller_function_name in {'_retrieve_plans','recieve_msg','_retrieve_context','_select_plan','has','rm','_check', '_format_check'}:
                 return None
             if data_type == search_with:
                 self.print(f'Does not contain {type(data_type).__qualname__} like {data_type}. Searched during {caller_function_name}()')
@@ -886,17 +1033,58 @@ class Agent:
                 self.print(f'Does not contain {type(data_type).__qualname__} like {search_with}. Searched during {caller_function_name}()')
             return None
     
-    def _search(self, type_base: Dict[str, Dict[str, Set[Belief]]] | Dict[str, Dict[str, Set[Percept]]] | Dict[str, Dict[str, Set[Goal]]], data, ck_type, ck_values, ck_src, all):
-        found = []
-        for keys in type_base.values():
-            for data_type_set in keys.values():
+    def _search(self, type_base: Dict[str, Dict[str, Set[Belief]]] | Dict[str, Dict[str, Set[Percept]]] | Dict[str, Dict[str, Set[Goal]]], data: Belief | Goal, ck_type: bool, ck_values: bool, ck_src: bool, all: bool):
+        """ 
+        Private Internal function to search for data
+        
+        Parameters
+        ----------
+            type_base : Dict[str, Dict[str, Set[Belief]]] | Dict[str, Dict[str, Set[Percept]]] | Dict[str, Dict[str, Set[Goal]]]
+                The type of data to search for.
+            data : Belief | Goal
+                The data to search for.
+            ck_type : bool
+                Whether to check the type of the data.
+            ck_values : bool
+                Whether to check the arguments of the data.
+            ck_src : bool
+                Whether to check the source of the data.
+            all : bool
+                Whether to return all matching data or just the first match.
+        
+        Returns
+        -------
+            found : List[Belief | Goal | Percept]
+                The retrieved data of the specified type.
+            None: If no matches are found, it returns None.
+        """
+        found: list[Belief | Goal | Percept] = []
+        if ck_src and data.source != DEFAULT_SOURCE:
+            try:
+                data_type_set = type_base[data.source][data.name]
+            except KeyError:
+                return found
+            for data_type in data_type_set:
+                if isinstance(data_type, Percept):
+                    data_type = Belief(data_type.name, data_type._values, data_type.source, data_type.adds_event)
+                if self._compare_data(data_type, data, ck_type, ck_values, ck_src):
+                    if not all:
+                        return data_type
+                    found.append(data_type)
+            return found
+        else:
+            for source_dict in type_base.values():
+                try:
+                    data_type_set = source_dict[data.name]
+                except KeyError:
+                    continue
                 for data_type in data_type_set:
                     if isinstance(data_type, Percept):
-                        data_type = Belief(data_type.name, data_type.values, data_type.source, data_type.adds_event)
-                    if self._compare_data(data_type,data,ck_type,ck_values,ck_src):
+                        data_type = Belief(data_type.name, data_type._values, data_type.source, data_type.adds_event)
+                    if self._compare_data(data_type, data, ck_type, ck_values, ck_src):
+                        if not all:
+                            return data_type
                         found.append(data_type)
-                        if not all: 
-                            return data_type  
         return found
          
     def wait(self, timeout: Optional[float] = None, event: Optional[Event] = None):
@@ -1021,7 +1209,22 @@ class Agent:
     def _get_running_intentions(self):
         return self.__running_intentions
     
-    def _to_belief_goal(self, data_type: Belief | Goal | Plan | Event):
+    def _to_belief_goal(self, data_type: Belief | Goal | Plan | Event) -> tuple[Optional[str | Event_Change], Optional[Belief | Goal]]:
+        """ 
+        Converts a belief, goal, plan or event to a tuple with the type change and the belief or goal. 
+        
+        Parameters
+        ----------
+        data_type : Belief | Goal | Plan | Event
+            The data type to convert.
+        
+        Returns
+        -------
+        change : Optional[str | Event_Change]
+            The change type.
+        belief_goal : Optional[Belief | Goal]
+            The belief or goal.
+        """
         change: Optional[str | Event_Change] = None
         belief_goal: Optional[Belief | Goal] = None
         match data_type:
@@ -1030,13 +1233,13 @@ class Agent:
             case Plan(): 
                 event_dt = data_type.trigger.data
                 if isinstance(event_dt, Percept):
-                    event_dt = Belief(event_dt.name, event_dt.values, event_dt.source)
+                    event_dt = Belief(event_dt.name, event_dt._values, event_dt.source)
                 change = data_type.trigger.change
                 belief_goal = event_dt
             case Event(): 
                 event_dt = data_type.data
                 if isinstance(event_dt, Percept):
-                    event_dt = Belief(event_dt.name, event_dt.values, event_dt.source)
+                    event_dt = Belief(event_dt.name, event_dt._values, event_dt.source)
                 change = data_type.change
                 belief_goal = event_dt
             case _: 
@@ -1044,33 +1247,56 @@ class Agent:
                 return None, None
         return change,belief_goal
     
-    def _compare_data(self, data1: Belief | Goal | Percept, data2: Belief | Goal | Percept, ck_type: bool, ck_values: bool, ck_src: bool):
-        buffer = f"Comparing: {data1}  &  {data2}"
+    def _compare_data(self, data1: Belief | Goal | Percept | None, data2: Belief | Goal | Percept | None, ck_type: bool, ck_values: bool, ck_src: bool):
+        """ 
+        Compares two beliefs, goals or percepts.
+        
+        Parameters
+        ----------
+        data1 : Belief | Goal | Percept
+            The first data to compare.
+        data2 : Belief | Goal | Percept
+            The second data to compare.
+        ck_type : bool
+            If True, the type of the data is checked.
+        ck_values : bool
+            If True, the values of the data are checked.
+        ck_src : bool
+            If True, the source of the data is checked.
+        
+        Returns
+        -------
+        bool
+            True if the data are the same, False otherwise.
+        """
+        if data1 is None or data2 is None:
+            if self.show_slct: self.print(f"Comparing: {data1}  &  {data2} >> None")
+            return False
         if ck_type and type(data1) is not type(data2):
-            self.print(f"{buffer} >> Different type") if self.show_slct else ...
+            if self.show_slct: self.print(f"Comparing: {data1}  &  {data2} >> Different type")
             return False
         if data1.name != data2.name:
-            self.print(f"{buffer} >> Different key") if self.show_slct else ...
+            if self.show_slct: self.print(f"Comparing: {data1}  &  {data2} >> Different key")
             return False
         if ck_src and data2.source != DEFAULT_SOURCE and data1.source != data2.source:
-            self.print(f"{buffer} >> Different source") if self.show_slct else ...
+            if self.show_slct: self.print(f"Comparing: {data1}  &  {data2} >> Different source")
             return False
         if not ck_values:
             return True
-        if data1.values_len != data2.values_len:
-            self.print(f"{buffer} >> Different values length") if self.show_slct else ...
+        if data1.v_len != data2.v_len:
+            if self.show_slct: self.print(f"Comparing: {data1}  &  {data2} >> Different values length {data1.v_len} x {data2.v_len}")
             return False
-        for arg1,arg2 in zip(data1._values,data2._values):
+        
+        for arg1,arg2 in zip(data1._values, data2._values):
             if arg1 is Any or arg2 is Any or arg1 == arg2:
                 continue
-            else:
-                self.print(f"{buffer} >> Different values {arg1} x {arg2}") if self.show_slct else ...
-                return False
+            if self.show_slct: self.print(f"Comparing: {data1}  &  {data2} >> Different values {arg1} x {arg2}")
+            return False
         else:
-            self.print(f"{buffer} >> Compatible") if self.show_slct else ...
+            if self.show_slct: self.print(f"Comparing: {data1}  &  {data2} >> Compatible")
             return True
     
-    def send(self, target: str | List[str] | broadcast, msg_act: Act, msg: MSG, channel: str = DEFAULT_CHANNEL) -> None | Belief | Goal | Plan | Iterable[Belief | Goal | Plan]: 
+    def send(self, target: str | List[str] | type[broadcast], msg_act: Act, msg: MSG, channel: str = DEFAULT_CHANNEL, no_lock: bool = False) -> None | Belief | Goal | Plan | Iterable[Belief | Goal | Plan]: 
         """
         Sends a message to a target agent or list of agents, optionally through a channel
         
@@ -1088,8 +1314,6 @@ class Agent:
                 The name of channel to send the message through. Defaults to DEFAULT_CHANNEL.
         """
         self.last_sent = []
-        #self.print(f"Sending {msg_act.name} to {target} on {channel} [{self._check_caller()}]")
-        
         if type(target) is str and not target.split("_")[-1].isdigit():
             target = f"{target}_1"
         try:
@@ -1098,16 +1322,13 @@ class Agent:
                     assert isinstance(msg, Belief | Goal)
                     msg = Ask(msg, self.my_name)
                     
-                #self._channels[channel]._send(self.my_name,target,msg_act,msg)
                 msg.reply_event.clear()
-                send_thread = threading.Thread(target=self._channels[channel]._send,args=(self.my_name,target,msg_act,msg))
-                send_thread.start()
-                self.last_sent.append((self.my_name,target,msg_act.name,msg))
+                future = self._msg_executor.submit(self._channels[channel]._send, self.my_name,target,msg_act,msg)
                 was_set = msg.reply_event.wait(timeout=2)
                 
                 if msg.reply_content is not None:
-                    self.add(msg.reply_content, False)
-                    self.logger.info(f'Reply for {msg} from {target}', extra=self.agent_info) if self.logging else ...
+                    self.add(msg.reply_content, False, no_lock)
+                    if self.logging: self.logger.info(f'Reply for {msg} from {target}', extra=self.agent_info)
                     return msg.reply_content
                 elif was_set:
                     if self.logging:
@@ -1122,30 +1343,25 @@ class Agent:
                         self.print(f"Timeout while waiting a reply for {msg}")    
                     return None
             else:
-                #self._channels[channel]._send(self.my_name,target,msg_act,msg)
-                send_thread = threading.Thread(target=self._channels[channel]._send,args=(self.my_name,target,msg_act,msg))
-                send_thread.start()
-                self.last_sent.append((self.my_name,target,msg_act.name,msg))
+                future = self._msg_executor.submit(self._channels[channel]._send, self.my_name,target,msg_act,msg)
             
             ch = "in the default channel"
             if channel != DEFAULT_CHANNEL:
                 ch = f"in the channel {channel}"
             if isinstance(target,str | list): 
-                self.logger.debug(f'Send Message: {self.my_name}  to  {target}  -  {msg_act.name} {msg} {ch}', extra=self.agent_info) if self.logging else ...
-                # self.save_cycle_log("Send Message", f' {self.my_name}  to  {target}  -  {msg_act.name} {msg}{ch}')
+                if self.logging: self.logger.debug(f'Send Message: {self.my_name}  to  {target}  -  {msg_act.name} {msg} {ch}', extra=self.agent_info)
             else:
-                self.logger.debug(f'Send Message: {self.my_name}  broadcasting  {msg_act.name} {msg} {ch}', extra=self.agent_info) if self.logging else ...
-                # self.save_cycle_log("Send Message", f' {self.my_name}  broadcasting  {msg_act.name} {msg}{ch}')
+                if self.logging: self.logger.debug(f'Send Message: {self.my_name}  broadcasting  {msg_act.name} {msg} {ch}', extra=self.agent_info)
         except KeyError:
             if self.show_exec:
                 self.print(f'Not Connected to Selected Channel:{channel}')
-            self.logger.warning(f'Agent:{self.my_name} Not Connected to Selected Channel:{channel}', extra=self.agent_info) if self.logging else ...
+            if self.logging: self.logger.warning(f'Agent:{self.my_name} Not Connected to Selected Channel:{channel}', extra=self.agent_info)
             raise KeyError(f"Connection Error: Not Connected to Selected Channel:{channel}")
         except AssertionError:
             raise
         return None
     
-    def sendf(self, target: str | List[str] | broadcast, msg: MSG, forget: bool = False, channel: str = DEFAULT_CHANNEL) -> None:   
+    def sendf(self, target: str | List[str] | broadcast, msg: MSG, forget: bool = False, channel: str = DEFAULT_CHANNEL, no_lock: bool = False) -> None:   
         """
         Sends a message to a target agent or list of agents, optionally through a channel
         
@@ -1162,35 +1378,29 @@ class Agent:
         """
         
         self.last_sent = []
-        #self.print(f"Sending {msg_act.name} to {target} on {channel} [{self._check_caller()}]")
-        
         if type(target) is str and not target.split("_")[-1].isdigit():
             target = f"{target}_1"
         try:
-            #self._channels[channel]._send(self.my_name,target,msg_act,msg)
             typ = "forget" if forget else "add"
-            send_thread = threading.Thread(target=self._channels[channel]._sendf,args=(self.my_name,target,msg,typ))
-            send_thread.start()
+            future = self._msg_executor.submit(self._channels[channel]._sendf, self.my_name,target,msg,typ)
             self.last_sent.append((self.my_name,target,typ,msg))
             
             ch = "in the default channel"
             if channel != DEFAULT_CHANNEL:
                 ch = f"in the channel {channel}"
             if isinstance(target,str | list): 
-                self.logger.debug(f'Send Message: {self.my_name}  to  {target}  -  {typ} {msg} {ch}', extra=self.agent_info) if self.logging else ...
-                # self.save_cycle_log("Send Message", f' {self.my_name}  to  {target}  -  {msg_act.name} {msg}{ch}')
+                if self.logging: self.logger.debug(f'Send Message: {self.my_name}  to  {target}  -  {typ} {msg} {ch}', extra=self.agent_info)
             else:
-                self.logger.debug(f'Send Message: {self.my_name}  broadcasting  {typ} {msg} {ch}', extra=self.agent_info) if self.logging else ...
-                # self.save_cycle_log("Send Message", f' {self.my_name}  broadcasting  {msg_act.name} {msg}{ch}')
+                if self.logging: self.logger.debug(f'Send Message: {self.my_name}  broadcasting  {typ} {msg} {ch}', extra=self.agent_info)
         except KeyError:
             if self.show_exec:
                 self.print(f'Not Connected to Selected Channel:{channel}')
-            self.logger.warning(f'Agent:{self.my_name} Not Connected to Selected Channel:{channel}', extra=self.agent_info) if self.logging else ...
+            if self.logging: self.logger.warning(f'Agent:{self.my_name} Not Connected to Selected Channel:{channel}', extra=self.agent_info)
         except AssertionError:
             raise
         return None
 
-    def ask(self, target: str | List[str] | broadcast, msg: MSG, all: bool = False, wait_reply: bool = False, channel: str = DEFAULT_CHANNEL) -> None | Belief | Goal | Plan | Iterable[Belief | Goal | Plan]:
+    def ask(self, target: str | List[str] | broadcast, msg: MSG, all: bool = False, wait_reply: bool = False, channel: str = DEFAULT_CHANNEL, no_lock: bool = False) -> None | Belief | Goal | Plan | Iterable[Belief | Goal | Plan]:
         """
         Sends a message to target agent asking for an information
         Optionally, the agent can wait for the reply
@@ -1220,14 +1430,13 @@ class Agent:
             #self._channels[channel]._send(self.my_name,target,msg_act,msg)
             typ = f'ask{"All" if all else ""}{"Reply" if wait_reply else ""}'
             msg.reply_event.clear()
-            send_thread = threading.Thread(target=self._channels[channel]._sendf,args=(self.my_name,target,msg,typ))
-            send_thread.start()
+            future = self._msg_executor.submit(self._channels[channel]._sendf, self.my_name,target,msg,typ)
             self.last_sent.append((self.my_name,target,typ,msg))
             was_set = msg.reply_event.wait(timeout=2)
             
             if msg.reply_content is not None:
-                self.add(msg.reply_content, False)
-                self.logger.info(f'Reply for {msg} from {target}', extra=self.agent_info) if self.logging else ...
+                self.add(msg.reply_content, False, no_lock)
+                if self.logging: self.logger.info(f'Reply for {msg} from {target}', extra=self.agent_info)
                 return msg.reply_content
             elif was_set:
                 if self.logging:
@@ -1242,23 +1451,43 @@ class Agent:
                     self.print(f"Timeout while waiting a reply for {msg}")    
                 return None
         except KeyError:
-            self.logger.warning(f'Agent:{self.my_name} Not Connected to Selected Channel:{channel}', extra=self.agent_info) if self.logging else ...
+            if self.logging: self.logger.warning(f'Agent:{self.my_name} Not Connected to Selected Channel:{channel}', extra=self.agent_info)
         except AssertionError:
             raise
         return None
     
-    def _save_msg(self, typ: str | Act, msg: Belief | Goal | Ask | Plan | List[Belief | Goal | Ask | Plan], msg_flag: bool) -> None:
+    def _save_msg(self, typ: str | Act, msg: Belief | Goal | Ask | Plan | List[Belief | Goal | Plan], msg_flag: bool) -> None:
+        """ 
+        Save Message to Mail
+        
+        Parameters
+        ----------
+            typ : str | Act
+                The type of the Message
+            msg : Belief | Goal | Ask | Plan | List[Belief | Goal | Ask | Plan]
+                The Message
+            msg_flag : bool
+                Whether the Message uses alternate format
+        """
         if self.instant_mail: 
             try:
                 self._recieve_msgf(cast(str,typ),msg) if msg_flag else self._recieve_msg(cast(Act,typ),msg)
             except AssertionError:
                 raise
         else:
-            #with self.msg_lock:
-            self.logger.info(f'Saving Message to Mail: {msg}', extra=self.agent_info) if self.logging else ...
+            if self.logging: self.logger.info(f'Saving Message to Mail: {msg}', extra=self.agent_info)
             self.saved_msgs.append((typ,msg,msg_flag))
+        self._notify_work()
 
     def _mail(self, selection_function: Callable | None = None) -> None:
+        """ 
+        Read Oldest Message from Mail
+        
+        Parameters
+        ----------
+        selection_function : Callable | None
+            The Optional function to select the message [default: None]        
+        """
         self.last_recv = []
         if callable(selection_function):
             selection_function(self.saved_msgs)
@@ -1277,7 +1506,7 @@ class Agent:
                 try:
                     self.last_recv.append((typ,msg))    
                     
-                    self.logger.debug(f'Receiving Message: {msg}', extra=self.agent_info) if self.logging else ...
+                    if self.logging: self.logger.debug(f'Receiving Message: {msg}', extra=self.agent_info)
                     
                     self._recieve_msgf(typ,msg) if msg_flag else self._recieve_msg(typ,msg)
                 except AssertionError as ae:
@@ -1289,28 +1518,39 @@ class Agent:
                     
                     print("Error originated from:")
                     print(formatted_last_frame)
+                    self.logger.error(formatted_last_frame, extra=self.agent_info)
     
     def _recieve_msg(self, act: Act, msg: MSG) -> None:
+        """ 
+        Properly Recieve KQML Message
+        
+        Parameters
+        ----------
+            act : Act
+                The Act / Perfomative of the Message (tell | achieve | untell | unachieve | askOne | askAll)
+            msg : MSG
+                The Message Content (Belief | Ask | Goal | Plan | List[Belief | Ask | Goal | Plan])
+        """
         match act.name:
             case 'tell':
                 assert isinstance(msg, Belief),f'Act tell must receive Belief not {type(msg).__qualname__}'
-                self.add(msg, False)
+                self.add(msg, False, True)
                 
             case 'achieve':
                 assert isinstance(msg, Goal),f'Act achieve must receive Goal not {type(msg).__qualname__}'
-                self.add(msg, False)
+                self.add(msg, False, True)
                 
             case 'untell':
                 assert isinstance(msg, Belief),f'Act untell must receive Belief not {type(msg).__qualname__}'
-                self.rm(msg, False)
+                self.rm(msg, False, True)
                 
             case 'unachieve':
                 assert isinstance(msg, Goal),f'Act unachieve must receive Goal not {type(msg).__qualname__}'
-                self.rm(msg, False)
+                self.rm(msg, False, True)
                 
             case 'askOne':
                 assert isinstance(msg, Ask), f'Act askOne must request an Ask not {type(msg).__qualname__}'
-                found_data = self.get(msg.data_type,ck_src=False)
+                found_data = self.get(msg.data_type,ck_src=False,no_lock=True)
                 if isinstance(found_data, Belief):
                     self.send(msg.source, Act.tell, found_data)
                     
@@ -1319,11 +1559,11 @@ class Agent:
                 found_data = self.get(msg.data_type,ck_src=False,no_lock=True)
                 if isinstance(found_data, Belief):
                     msg.reply_content = Belief(
-                        found_data.name, found_data.values, 
+                        found_data.name, found_data._values, 
                         self.my_name, found_data.adds_event)
                 elif isinstance(found_data, Goal):
                     msg.reply_content = Goal(
-                        found_data.name, found_data.values,self.my_name
+                        found_data.name, found_data._values,self.my_name
                     )
                 else:
                     msg.reply_content = None
@@ -1345,11 +1585,11 @@ class Agent:
                     for data in found_data:
                         if isinstance(found_data, Belief):
                             content.append(Belief(
-                                found_data.name, found_data.values, 
+                                found_data.name, found_data._values, 
                                 self.my_name, found_data.adds_event))
                         elif isinstance(found_data, Goal):
                             content.append(Goal(
-                                found_data.name, found_data.values,self.my_name
+                                found_data.name, found_data._values,self.my_name
                             ))
                     msg.reply_content = content
                 else:
@@ -1358,11 +1598,11 @@ class Agent:
                     
             case 'tellHow':
                 assert isinstance(msg, Plan), f'Act tellHow must receive a Plan not {type(msg).__qualname__}'
-                self.add_plan(msg)
+                self.add(msg, False, True)
 
             case 'untellHow':
                 assert isinstance(msg, Plan), f'Act untellHow must receive a Plan not {type(msg).__qualname__}'
-                self.rm_plan(msg)
+                self.add(msg, False, True)
 
             case 'askHow':
                 assert isinstance(msg, Ask), f'Act askHow must request an Ask not {type(msg).__qualname__}'
@@ -1374,7 +1614,17 @@ class Agent:
             case _:
                 TypeError(f"Unknown type of message {act}:{msg}")
 
-    def _recieve_msgf(self, typ: str, msg: Belief | Goal | Plan | Ask | List[Belief | Goal | Ask | Plan]) -> None:
+    def _recieve_msgf(self, typ: str, msg: Belief | Goal | Plan | Ask | List[Belief | Goal | Plan]) -> None:
+        """ 
+        Alternative Method to Receive the Message (Without Proper KQML)
+
+        Parameters
+        ----------
+            typ : str
+                The type of message (add | forget | ask | askReply)
+            msg : Belief | Goal | Plan | Ask | List[Belief | Goal | Ask | Plan]
+                The message
+        """
         match typ:
             case "add":
                 assert not isinstance(msg, Ask)
@@ -1397,11 +1647,11 @@ class Agent:
                 found_data = self.get(msg.data_type,ck_src=False,no_lock=True)
                 if isinstance(found_data, Belief):
                     msg.reply_content = Belief(
-                        found_data.name, found_data.values, 
+                        found_data.name, found_data._values, 
                         self.my_name, found_data.adds_event)
                 elif isinstance(found_data, Goal):
                     msg.reply_content = Goal(
-                        found_data.name, found_data.values,self.my_name
+                        found_data.name, found_data._values,self.my_name
                     )
                 elif isinstance(found_data, Plan):
                     msg.reply_content = found_data
@@ -1425,11 +1675,11 @@ class Agent:
                     for data in found_data:
                         if isinstance(found_data, Belief):
                             content.append(Belief(
-                                found_data.name, found_data.values, 
+                                found_data.name, found_data._values, 
                                 self.my_name, found_data.adds_event))
                         elif isinstance(found_data, Goal):
                             content.append(Goal(
-                                found_data.name, found_data.values,self.my_name
+                                found_data.name, found_data._values,self.my_name
                             ))
                         elif isinstance(found_data, Plan):
                             content.append(found_data)
@@ -1541,21 +1791,33 @@ class Agent:
     def start_cycle(self, start_flag: threading.Event | None = None) -> None:
         """Starts the Agent's Reasoning Cycle"""    
         self.running = True
+        self.paused_agent = False
         self.stop_flag = threading.Event()
         self.thread = threading.Thread(target=self._cycle,args=(start_flag,self.stop_flag,))
         self.thread.start()
     
     def stop_cycle(self, log_flag=False) -> None:
         """Stops the Agent's Reasoning Cycle"""
-        self.running = False
-        self.logger.debug("Ending Reasoning", extra=self.agent_info) if self.logging else ...
-        # self.save_cycle_log(decision="End of Reasoning")
-        if self.stop_flag is not None:
-            self.stop_flag.set()
-        self.paused_agent = True
-        #sys.exit()
+        if self.running: 
+            self.running = False
+            if self.stop_flag is not None: self.stop_flag.set()
+            self._plan_executor.shutdown(wait=False)
+            #self.print("Stopping Reasoning")
+            if self.logging: self.logger.debug("Ending Reasoning", extra=self.agent_info)
+            
+        
                  
     def _cycle(self, start_flag: threading.Event, stop_flag: threading.Event) -> None:
+        """
+        ## The main Reasoning Loop of the Agent
+            1. Perception
+            2. Mail
+            3. Select Event
+            4. Retrieve Plans
+            5. Create Intention
+            6. Select Intention
+            7. Execute Intention
+        """
         if start_flag is not None:
             start_flag.wait()
  
@@ -1564,15 +1826,28 @@ class Agent:
         while not stop_flag.is_set():  
             if self.paused_agent:
                 start_flag.wait()
-                
-            with self.update_lock:
-                self._perception()
-                self._mail()
+            
+            self._work_condition.wait(timeout=1.0)
+            self._work_condition.clear()
+            
+            if stop_flag.is_set():
+                break
+            
+            if self._environments:
+                with self.update_lock: self._perception()
+            if self.saved_msgs:
+                with self.update_lock: self._mail()
             
             num_running_intentions = self.__running_intentions.__len__()
-            self.curr_event, pending_flag = self._select_event()
-            self.relevant_plans = self._retrieve_plans(self.curr_event)
-            self._create_intention(self.relevant_plans, self.curr_event, pending_flag)
+            while True: # loop until there are no more events
+                self.curr_event, pending_flag = self._select_event()
+                if self.curr_event is None: # if no events, there will be no new intention
+                    break # no need to retrieve plans ou create an intention then
+                self.relevant_plans = self._retrieve_plans(self.curr_event)
+                if self.relevant_plans: # if there are relevant plans, check if any is applicable to create an intention
+                    self._create_intention(self.relevant_plans, self.curr_event, pending_flag)
+                    break
+            
             intention = self._select_intention()
             
             if stop_flag.is_set():
@@ -1580,31 +1855,61 @@ class Agent:
             
             self._execute_intention(intention, num_running_intentions)
             
-            self._delay()
+            if self.delay > 0:
+                self._delay()
             self.cycle_counter += 1
     
+    def _notify_work(self):
+        if not self._work_condition.is_set():
+            self._work_condition.set()
+    
     def _delay(self):
+        """ 
+        ### Delays the Agent's Reasoning Cycle
+        Delay is normally set to 0
+        
+        Without this, an agent will hog the CPU and slow down the system
+        
+        With a sleep(0) [at least] the agent yields his thread to others
+        """
         sleep(self.delay)
 
-    def _execute_intention(self, intention: Intention | None, num_running_intentions: int):
-        #chosen_plan, trgr, args = intention
+    def _execute_intention(self, intention: Intention | None, num_running_intentions: int) -> None:
+        """ 
+        ### Executes a given Intention (Plan, Trigger Event, Arguments)
+
+        When the intention is None, if: 
+            1. The number of running Intentions is less than the maximum number of concurrently running Intentions 
+            2. There are available strategies
+            3. Agent is set to auto_action
+                The agent will try to execute a strategy
+        
+            If there are no strategies available, the agent will idle
+        
+        Parameters
+        ----------
+        intention : Intention
+            The Intention to be executed
+        num_running_intentions : int
+            The number of currently running Intentions
+        """
         if intention is None: 
             if num_running_intentions < self.max_intentions and self._strategies and self.auto_action:
                 self.idle_counter = 0
-                threading.Thread(target=self._execute_strategy).start()
+                future = self._plan_executor.submit(self._execute_strategy)
             elif num_running_intentions > 0:
                 self.idle_counter = 0
                 if self.last_log != "Running Intention":
                     self.last_log = "Running Intention"
-                    self.logger.debug("Running Intention", extra=self.agent_info) if self.logging else ...
+                    if self.logging: self.logger.debug("Running Intention", extra=self.agent_info)
             else:
                 if self.last_log != "idle":
                     self.last_log = "idle"
                     if self.show_exec: self.print("Idle")
-                    self.logger.debug("Idle", extra=self.agent_info) if self.logging else ...
+                    if self.logging: self.logger.debug("Idle", extra=self.agent_info)
                 try:
                     self.idle_counter += 1
-                    threading.Thread(target=self.on_idle).start()
+                    future = self._plan_executor.submit(self.on_idle)
                 except Exception as e:
                     ...
         else:
@@ -1613,6 +1918,11 @@ class Agent:
             self._execute_plan(intention)
             
     def _execute_strategy(self):
+        """ 
+        ### Executes a strategy
+        
+        The agent will try to execute the first available strategy
+        """
         for strat in self._strategies:
             state, terminated = strat.get_state()
             if terminated:
@@ -1622,7 +1932,7 @@ class Agent:
             str_action = strat.actions_list[int_action]
             action = strat.actions_dict[str_action]
             if self.show_exec: self.print(f"Executing Strategy {strat.name}({str_action})")
-            self.logger.debug(f"Executing Strategy {strat.name}({str_action})", extra=self.agent_info) if self.logging else ...
+            if self.logging: self.logger.debug(f"Executing Strategy {strat.name}({str_action})", extra=self.agent_info)
             if not isinstance(str_action, str):
                 str_action = str_action.original
             if len(action.data) == 1:
@@ -1641,7 +1951,6 @@ class Agent:
             description = self._format_data(decision,chosen_plan,trgr,args)
         elif len(self.__running_intentions) >= 1:
             decision = "Running Intention"
-            #description = self._format_data(decision,*self.__running_intentions[0])
         elif self._strategies and self.auto_action:
             for strat in self._strategies:
                 state, terminated = strat.get_state()
@@ -1667,11 +1976,11 @@ class Agent:
         
         message = f"{decision}: {description}"
         if last_message != message:
-            self.logger.debug(message, extra=self.agent_info) if self.logging else ...
+            if self.logging: self.logger.debug(message, extra=self.agent_info)
             last_message = message
         return last_message
                 
-    def best_action(self, env_name: str, set_state: Any = None) -> None:
+    def get_best_action(self, env_name: str, set_state: Any = None) -> tuple[Any, Callable] | None:
         """
         Executes the best trained Action on the given Environment, optionally on a given State
         
@@ -1681,6 +1990,11 @@ class Agent:
                 The name of the Environment the Agent has a trained model for.
             set_state : (Any, optional)
                 A given state for this Environment. Defaults to None.
+                
+        Returns
+        -------
+            action : Any or None
+                The Action that was executed or None if no Action was executed
         """
         assert isinstance(env_name, str), f"best_action must receive string envrironment name not {type(env_name).__qualname__}"
         
@@ -1698,22 +2012,19 @@ class Agent:
                 int_action = strat.get_action(state)
                 
             str_action = strat.actions_list[int_action]
-            action = strat.actions_dict[str_action]
-            if len(action.data) == 1:
-                action.func(strat.env, self.my_name)
-            else:
-                action.func(strat.env, self.my_name, str_action.original)
             decision = "Execute Strategy"
             description = f'state: {state} action: {str_action}'
-            self.logger.debug(f'{decision}: {description}', extra=self.agent_info) if self.logging else ...
-            # self.save_cycle_log(decision, description)
-            break
-        else:
-            if self.show_exec: self.print(f"No policy for Environment: {env_name}")
-            self.logger.warning(f"No policy for Environment: {env_name}", extra=self.agent_info) if self.logging else ...
+            if self.logging: self.logger.debug(f'{decision}: {description}', extra=self.agent_info)
+            return str_action.original, strat.actions_dict[str_action].func
+        
+        if self.show_exec: self.print(f"No policy for Environment: {env_name}")
+        if self.logging: self.logger.warning(f"No policy for Environment: {env_name}", extra=self.agent_info)
+        return None
     
     def _perception(self) -> None:
-        #self.logger.debug(f"Perceiving Environments {self._environments}", extra=self.agent_info) if self.logging else ...
+        """ 
+            Perceives all connected Environments and updates the agent's beliefs
+        """
         percept_dict: Dict[str, dict] = dict()
         with self.env_lock:
             for env_name in self._environments:
@@ -1722,10 +2033,13 @@ class Agent:
                 merge_dicts(percepts,percept_dict)
         if percept_dict == {}:
             return
-        #belief_dict: Dict[str, Dict[str, Set[Belief]]] = self._percepts_to_beliefs_new(percept_dict)
+        self._env_changed_count = 0
         self._revision(percept_dict)
     
     def _apply_filters(self, percepts: Dict[str, Dict[str, Set[Percept]]], env_name: str):
+        """ 
+            Filters incoming percepts based on the agent's percept_filter
+        """
         filtered_percepts: Dict[str, Dict[str, Set[Percept]]] = dict()
         focusing = True if len(self.percept_filter['focus']) > 0 else False
         for group, keys in percepts.items():
@@ -1760,38 +2074,41 @@ class Agent:
                 try:
                     percepts = self._environments[name]._perception()
                     percepts = self._apply_filters(percepts,name)
-                    self.logger.info(f"Perceiving {name} : {percepts}", extra=self.agent_info) if self.logging else ...
+                    if self.logging: self.logger.info(f"Perceiving {name} : {percepts}", extra=self.agent_info)
                     merge_dicts(percepts,percept_dict)
                 except KeyError:
                     if self.show_exec: self.print(f"Not Connected to Environment:{name}")
-                    self.logger.warning(f"Not Connected to Environment:{name}", extra=self.agent_info) if self.logging else ...
+                    if self.logging: self.logger.warning(f"Not Connected to Environment:{name}", extra=self.agent_info)
         else:
             try:
                 percept_dict = self._environments[env_name]._perception()
                 percept_dict = self._apply_filters(percept_dict,env_name)
-                self.logger.info(f"Perceiving {env_name} : {percept_dict}", extra=self.agent_info) if self.logging else ...
+                if self.logging: self.logger.info(f"Perceiving {env_name} : {percept_dict}", extra=self.agent_info)
             except KeyError:
                 if self.show_exec: self.print(f"Not Connected to Environment:{env_name}")
-                self.logger.warning(f"Not Connected to Environment:{env_name}", extra=self.agent_info) if self.logging else ...
+                if self.logging: self.logger.warning(f"Not Connected to Environment:{env_name}", extra=self.agent_info)
         
         #belief_dict = self._percepts_to_beliefs_new(percept_dict)
         self._revision(percept_dict)
     
     def _percepts_to_beliefs(self,percepts: Dict[str, Dict[str, Set[Percept]]]) -> Dict[str, Dict[str, Set[Belief]]]:
+        """ 
+            Converts a dictionary of percepts to a dictionary of beliefs
+        """
         beliefs: Dict[str, Dict[str, Set[Belief]]] = dict()
         for source, keys in percepts.items():
             beliefs[source] = dict()
             for key,percepts_set in keys.items():
                 belief_set: Set[Belief] = set()
                 for percept in percepts_set:
-                    belief_set.add(Belief(percept.name,percept.values,source,percept.adds_event))
+                    belief_set.add(Belief(percept.name,percept._values,source,percept.adds_event))
                 beliefs[source][key] = belief_set
         return beliefs
     
     def _percepts_to_beliefs_new(self,percepts: Dict[str, Dict[str, Set[Percept]]]) -> Dict[str, Dict[str, Set[Belief]]]:
         beliefs: Dict[str, Dict[str, Set[Belief]]] = {
             source: {
-                key: {Belief(percept.name, percept.values, source, percept.adds_event) for percept in percepts_set}
+                key: {Belief(percept.name, percept._values, source, percept.adds_event) for percept in percepts_set}
                 for key, percepts_set in keys.items()
             }
             for source, keys in percepts.items()
@@ -1799,6 +2116,9 @@ class Agent:
         return beliefs
                     
     def _revision(self, new_dict: Dict[str, Dict[str, Set[Percept]]]) -> None:
+        """ 
+            Revisions the agent's beliefs based on the new perceptions
+        """
         for source, keys in self.__perceptions.copy().items():
             if source not in self._environments.keys() or isinstance(source, tuple):
                 continue
@@ -1811,31 +2131,33 @@ class Agent:
                         self._new_event(lose, lost_beliefs) # Lost an old specific belief
                         del new_dict[source][key]
                         if gained_beliefs:
-                            self.logger.debug(f"Beliefs Gained: {source} Specific Beliefs gained in revision: {gained_beliefs}", extra=self.agent_info) if self.logging else ...
+                            if self.logging: self.logger.debug(f"Beliefs Gained: {source} Specific Beliefs gained in revision: {gained_beliefs}", extra=self.agent_info)
                         if lost_beliefs:
-                            self.logger.debug(f"Beliefs Lost: {source} Specific Beliefs lost in revision: {lost_beliefs}", extra=self.agent_info) if self.logging else ...
+                            if self.logging: self.logger.debug(f"Beliefs Lost: {source} Specific Beliefs lost in revision: {lost_beliefs}", extra=self.agent_info)
                     else:
                         self._new_event(lose, self.__perceptions[source][key]) # Lost whole key belief
-                        self.logger.debug(f"Beliefs Lost: {source} Beliefs lost in revision: {self.__perceptions[source][key]}", extra=self.agent_info) if self.logging else ...
+                        if self.logging: self.logger.debug(f"Beliefs Lost: {source} {key} Beliefs lost in revision: {self.__perceptions[source][key]}", extra=self.agent_info)
                         del self.__perceptions[source][key]
                         
                 if new_dict[source] == {}:
                     del new_dict[source]
             else:
                 for beliefs in keys.values():
-                    self.logger.debug(f"Beliefs Lost: {source} Beliefs lost in revision: {beliefs}", extra=self.agent_info) if self.logging else ...
+                    if self.logging: self.logger.debug(f"Beliefs Lost: {source} Beliefs lost in revision: {beliefs}", extra=self.agent_info)
                     self._new_event(lose, beliefs) # Lost whole source of belief (env)
                 del self.__perceptions[source]
         
         for source,keys in new_dict.items():
             for beliefs in keys.values():
-                self.logger.debug(f"Beliefs Gained: Rest of {source} Beliefs gained in revision: {beliefs}", extra=self.agent_info) if self.logging else ...
-                # self.save_cycle_log("Beliefs Gained", f"Rest of {source} Beliefs gained in revision: {beliefs}")
+                if self.logging: self.logger.debug(f"Beliefs Gained: Rest of {source} Beliefs gained in revision: {beliefs}", extra=self.agent_info)
                 self._new_event(gain, beliefs) # Gained beliefs of new sources/keys
                 
         merge_dicts(new_dict,self.__perceptions)
     
     def _select_event(self) -> tuple[Event, bool] | tuple[None, bool]:
+        """ 
+            Selects the next Event (FIFO) to be processed 
+        """
         if self.__events == []:
             if self._pending_events != [] and self._pending_events[0][1] > self.cycle_counter:
                 return self._pending_events.pop(0)[0], False
@@ -1845,6 +2167,7 @@ class Agent:
             return self.__events.pop(0), True
     
     def _instant_plan(self, event: Event):
+        """ Executes the plan triggered by the event immediately """
         plans = self._retrieve_plans(event)
         if plans is None:
             if isinstance(event.data,Goal) and event.change.name == "gain":
@@ -1867,26 +2190,36 @@ class Agent:
                 break
             
         if args is not None:
-            if event.data.values_len < 2:
+            assert event.data is not None, f"{event} data is None"
+            if event.data.v_len < 2:
                 ev_args = event.data._values
             else:
                 ev_args = (event.data._values,)
-            self.logger.debug(f"Instant Plan: {self._format_data('Instant Plan',plan,event,ev_args+args)}", extra=self.agent_info) if self.logging else ...
-            # self.save_cycle_log("Instant Plan", self._format_data("Instant Plan",plan,event,ev_args+args),event,plans)
+            if self.logging: self.logger.debug(f"Instant Plan: {self._format_data('Instant Plan',plan,event,ev_args+args)}", extra=self.agent_info)
             self._run_plan(Intention(plan,event,ev_args+args),True)
         elif type(event.data) is Goal and event.change.name == "gain":
-            self.logger.warning(f"Doesnt have Plan with proper context for Event {event}", extra=self.agent_info) if self.logging else ...
+            if self.logging: self.logger.warning(f"Doesnt have Plan with proper context for Event {event}", extra=self.agent_info)
         else:
-            self.logger.debug(f"Doesnt have Plan with proper context for Event {event}", extra=self.agent_info) if self.logging else ...
+            if self.logging: self.logger.debug(f"Doesnt have Plan with proper context for Event {event}", extra=self.agent_info)
     
     def _retrieve_plans(self, event: Event | None) -> List[Plan] | None: 
-        if event is None: 
+        """ Retrieves the plans that are triggered by the event """
+        if event is None or event.data is None: 
             return None
-        retrieved = self.get(Plan,event,all=True,ck_src=False)
-        assert isinstance(retrieved, list | None), f"Unexpected Retrieved Plan: {type(retrieved)}, Expected List[Plan] | None"
-        return cast(List[Plan] | None, retrieved) 
+        key = (event.change, type(event.data), event.data.name)
+        retrieved = self._plan_index.get(key, None)
+        if retrieved is None:
+            return None
+        applicable: List[Plan] = []
+        for plan in retrieved:
+            if self._compare_data(plan.trigger.data, event.data, True, True, False):
+                applicable.append(plan)
+        if applicable == []:
+            return None
+        return applicable
     
     def _create_intention(self, plans: List[Plan] | None, event: Event | None, pending_flag: bool):
+        """ Creates an intention from the applicable plans that were triggered by the event """
         if plans is None or event is None:
             if event is not None and isinstance(event.data,Goal) and event.change.name == "gain":
                 if self.logging:
@@ -1900,7 +2233,7 @@ class Agent:
                     self.__goals[typ.source][typ.name].remove(typ)
                     self._new_event(failure, event.data, instant=False)
             elif event is not None and isinstance(event.data,Belief):
-                self.logger.debug(f"Doesn't have Plan for {event} as trigger event", extra=self.agent_info) if self.logging else ...
+                if self.logging: self.logger.debug(f"Doesn't have Plan for {event} as trigger event", extra=self.agent_info)
             return
         
         applicable_flag = True
@@ -1910,18 +2243,20 @@ class Agent:
             ctxt = self._retrieve_context(plan)
             if ctxt is not None:
                 applicable_flag = False
-                if event.data.values_len < 2:
-                    ev_args = event.data._values
-                else:
-                    ev_args = (event.data._values,)
+                assert event.data is not None, f"{event} data is None"
+                aux = event.data._values
+                ev_args = aux if isinstance(aux, tuple) and event.data.v_len < 2 else (aux,)
                 
                 if ctxt == ((),):
                     args = ev_args
                 else:
+                    if not isinstance(ctxt, tuple):
+                        ctxt = (ctxt,)
                     args = ev_args+ctxt
                     
-                #self.print(f'{args}[{len(args)}] - {event.data._args}[{event.data.args_len}] - {ctxt}[{len(ctxt)}]')    
-                self.__intentions.append(Intention(plan,event,args))
+                #print(f'{event.data.name} : {args}[{len(args)}] = {event.data.values}[{event.data.v_len}] + {ctxt}[{len(ctxt)}]')    
+                a = Intention(plan,event,args)
+                self.__intentions.append(a)
                 break
                 
         if applicable_flag and event is not None and isinstance(event.data,Goal) and event.change.name == "gain":
@@ -1938,6 +2273,11 @@ class Agent:
                 self._new_event(failure, event.data, instant=False)
     
     def _select_intention(self) -> Intention | None:    
+        """ 
+        Selects an intention from the list of intentions (FIFO)
+        
+        If the intention has the type of Plan 'atomic', then the max_intentions will be set to 1
+        """
         try:
             if self.__running_intentions.__len__() < self.max_intentions:
                 intention = self.__intentions.pop(0)
@@ -1949,40 +2289,42 @@ class Agent:
         except IndexError:
             if self.curr_event is not None and isinstance(self.curr_event.data,Goal) and self.curr_event.change.name == "gain":
                 if self.logging:
-                    self.logger.warning(f"Improper context for applicable plan(s) for {self.curr_event}", extra=self.agent_info) if self.logging else ...
+                    if self.logging: self.logger.warning(f"Improper context for applicable plan(s) for {self.curr_event}", extra=self.agent_info)
                 else:
-                    self.logger.debug(f"Improper context for applicable plan(s) for {self.curr_event}", extra=self.agent_info) if self.logging else ...
+                    if self.logging: self.logger.debug(f"Improper context for applicable plan(s) for {self.curr_event}", extra=self.agent_info)
             return None
     
     def _retrieve_context(self, plan: Plan) -> tuple | None:
+        """ Checks if the Agents has appropriate Beliefs or Goals for the Plan's context """
         args: tuple = tuple()
         
         if isinstance(plan.context, Condition):
-            c_args,_ = self._check(plan.context)
-            #print(f'Args: {c_args}')
-            return c_args
-        
-        for context in plan.context:
-            ctxt = self.get(context[1],ck_src=False) 
-            #print(f'{context} :: {ctxt}')
-            if ctxt is None:
-                if context[0] is False: 
-                    continue
-                break
-            assert isinstance(ctxt, Belief | Goal), f"Unexpected Context Type: {type(ctxt)}, Expected Belief | Goal"
-            if ctxt.values_len == 0: 
-                continue
-            elif ctxt.values_len == 1:
-                args += ctxt._values
+            if plan.context.c_type == "=":
+                assert isinstance(plan.context.left_value, Belief | Goal), f"Unexpected Context Type: {type(plan.context.left_value)}, Expected Belief | Goal"
+                ctxt = self.get(plan.context.left_value,ck_src=False)
+                if not ctxt:
+                    return None
+                assert isinstance(ctxt, Belief | Goal), f"{self.my_name} > {plan.context.left_value} - Unexpected Context Type: {type(ctxt)}, Expected Belief | Goal"
+                if ctxt.v_len == 1:
+                    return ctxt._values
+                else:
+                    return (ctxt._values,)  
             else:
-                args += (ctxt._values,)  
-            
+                if PRINT_CHECKS: self.print(f'Starting Check: {plan.context}')
+                c_args,_ = self._check(plan.context)
+                #print(f'{plan.body.__name__} - Context: {plan.context} - Context Args: {c_args}')
+                if c_args and len(c_args) == 1:
+                    return c_args[0]
+                else:
+                    return c_args
         else:
-            return args
-        return None
+            return tuple()
     
-    def _format_check(self, value, args, tupled):
-        #print(f'Formating Value: {value}:{type(value)}')
+    def _format_check(self, value: Belief | Goal | Condition, args: tuple, tupled: bool) -> tuple[tuple | None, bool, bool, bool]: 
+        """ The checking proccess for if the Belief or Goal is present in the Agent's knowledge """
+        f_value: tuple | Belief | Goal | bool | None
+        v_args: bool
+        if PRINT_CHECKS: self.print(f'Format Check: {value} :: {args} :: {tupled}')
         if isinstance(value, Condition) and not isinstance(value, Belief|Goal|Percept): 
             f_value, f_tupled = self._check(value, args, tupled)
             if f_value is None:
@@ -1993,12 +2335,13 @@ class Agent:
             f_value = value
             v_args = False
         
-        v_bool = False
+        v_bool: bool = False
+        v_data: tuple | Belief | Goal | Plan | Event | List[Belief | Goal | Plan | Event] | None
         if isinstance(f_value, Belief|Goal|Percept):
             v_data = self.get(f_value, ck_src=False)
-            if v_data is not None:
+            if v_data is not None and not isinstance(v_data, list | tuple | Plan | Event):
                 v_bool = True
-                v_data = v_data._values
+                v_data = cast(tuple, v_data._values)
             else:
                 v_data = (None,)
             for v in f_value._values:
@@ -2013,11 +2356,14 @@ class Agent:
         else:
             v_data = (f_value,)
             v_bool = True
-        
+        if isinstance(v_data, tuple) and len(v_data) == 1: 
+            f_tupled = True 
+        if PRINT_CHECKS: self.print(f'End of Format Check: {v_data} :: {v_bool} :: {v_args} :: {f_tupled}')
         return v_data, v_bool, v_args, f_tupled
     
-    def _check(self, condition: Condition, args: tuple = tuple(), tupled = False) -> tuple[tuple, bool] | tuple[None, bool]:
-        #print(f'Checking Condition: {condition} - {type(condition.left_value)} - {args} - {tupled}')
+    def _check(self, condition: Condition, args: tuple = tuple(), tupled: bool = False) -> tuple[tuple | None, bool]:
+        """ Checks if the Condition is True """
+        if PRINT_CHECKS: self.print(f'Checking Condition: {condition} - {type(condition.left_value)} - {args} - {tupled}')
         cnd_type = condition.c_type
         
         if cnd_type == "~":
@@ -2028,11 +2374,11 @@ class Agent:
             else:
                 return None, True
         
-        assert condition.right_value is not None and condition.func is not None, f"Unexpected Condition: {condition}"
+        assert condition.right_value is not None and condition.func is not None, f"Unexpected Condition: [ {condition} ]"
         
         v0_data, v0_bool, v0_args, v0_tupled = self._format_check(condition.left_value, args, tupled)
         v1_data, v1_bool, v1_args, v1_tupled = self._format_check(condition.right_value, args, tupled)
-        #print(f'Checking: {v0_data}:{v0_bool}:{v0_args}:{v0_tupled} | {v1_data}:{v1_bool}:{v1_args}:{v1_tupled}')
+        if PRINT_CHECKS: self.print(f'After Format Check: {v0_data}:{v0_bool}:{v0_args}:{v0_tupled} {condition.str_type} {v1_data}:{v1_bool}:{v1_args}:{v1_tupled}')
         
         if v0_data is None and v1_data is None:
             return None, tupled
@@ -2044,6 +2390,7 @@ class Agent:
             case "op":
                 ret_bool = condition.func(v0_bool, v1_bool)
             case "comp":
+                assert v0_data is not None and v1_data is not None
                 for v0, v1 in zip(v0_data,v1_data):
                     if v0 is None or v1 is None:
                         break
@@ -2058,21 +2405,27 @@ class Agent:
             return None, tupled
         
         f_args: tuple = tuple()
-        if v0_args:
+        if v0_args and v0_data is not None:
             if not v0_tupled:
                 f_args += (v0_data,)
             else:
                 f_args += v0_data
-        if v1_args:
+        if v1_args and v1_data is not None:
             if not v1_tupled:
                 f_args += (v1_data,)
             else:
                 f_args += v1_data
         f_args += args
-
+        
+        if PRINT_CHECKS: self.print(f'End of Check: {f_args}')
         return f_args, True
     
     def _force_close_thread(self, thread: threading.Thread):
+        """ 
+        Forces the thread to close
+        
+        Used to kill executing Intentions as a last resort
+        """
         thread_id = thread.ident
         assert isinstance(thread_id, int)
         res = ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(thread_id), ctypes.py_object(SystemExit))
@@ -2085,6 +2438,7 @@ class Agent:
         thread.join()
     
     def _execute_plan(self, intention: Intention):
+        """ Starts the executes of a Intention's Plan in separate thread """
         if self.__running_intentions.__len__() >= self.max_intentions:
             self.__intentions.insert(0,intention)
             if self.logging:
@@ -2093,11 +2447,11 @@ class Agent:
                 self.print(f"Intention {intention} not executed as max intentions reached")
             return None
         try:
-            #assert trigger is not None, f"Unexpected None Trigger with {chosen_plan}:{args}"
             self.__running_intentions.append(intention)
-            
-            plan_thread = threading.Thread(target=self._run_plan, args=(intention,))
-            plan_thread.start()
+            if intention.plan.plan_type.name == "atomic":
+                result = self._run_plan(intention)
+            else:
+                result = self._plan_executor.submit(self._run_plan, intention)
             
         except RunPlanError:
             if self.logging:
@@ -2106,9 +2460,11 @@ class Agent:
                 self.print(f"Intention {intention} failed")
 
     def _run_plan(self, intention: Intention, instant_flag: bool = False):
-        self.logger.debug(f"Executing Intention :{intention}", extra=self.agent_info) if self.logging else ...
-        self.print(f"Executing Intention : {intention}")  if self.show_exec or self.show_cycle else ...
+        """ Where the actual execution of a Intention's Plan occurs """
+        if self.logging: self.logger.debug(f"Executing Intention : {intention}", extra=self.agent_info)
+        if self.show_exec or self.show_cycle: self.print(f"Executing Intention : {intention}")
         try:     
+            assert intention.event.data is not None, f"{intention.event.data} data is None"
             result = intention.plan.body(self, intention.event.data.source, *intention.args)
                 
             self.last_event = intention.event
@@ -2137,7 +2493,7 @@ class Agent:
                         self._new_event(success, trigger_data, instant=False)
                         if self.show_exec:
                             self.print(f"{intention} successfully cleared")
-                        self.logger.info(f"{intention.event} cleared", extra=self.agent_info) if self.logging else ...
+                        if self.logging: self.logger.info(f"{intention.event} cleared", extra=self.agent_info)
                     else:
                         if self.logging:
                             self.logger.warning(f"{trigger_data} already cleared by another plan's execution", extra=self.agent_info)
@@ -2174,10 +2530,11 @@ class Agent:
             elif "is not hash" in str(e):
                 buffer += f"\tWhile adding a \033[1m{str(e).split('.')[0]}\033[0m: {repr(e)}\n"
             else:      
-                buffer += f"\t{repr(e)}\n"
+                buffer += f"\t>>{repr(e)}\n"
             if "args" in str(e):
                 buffer += f"\tThe \033[1margs\033[0m parameter in Belief/Goal/Percept was changed to \033[1mvalues\033[0m\n\tPlease replace <>.args to <>.values in your implementation" 
             print(buffer)
+            self.logger.error(buffer, extra=self.agent_info)
             exit(-1) 
     
     def save_cycle_log(self, decision: str, description: Any | None = None, event: Event | None = None, plans: List[Plan] | None = None) -> None:
@@ -2209,18 +2566,13 @@ class Agent:
                 self.cycle_log[sys_time].append(log)
             else:
                 self.cycle_log[sys_time] = [log]
-    
-    # TODO: implement stoping plan
-    def _stop_plan(self, plan):
-        self.print(f"Stoping {plan})")  if self.show_exec else ...
-        pass    
-    
+      
     def _format_data(self, decision: str, chosen_plan: Plan | None = None, trgr: Event | None = None, args: tuple | None = None, data_type: Iterable[Belief | Goal | Plan] | Belief | Goal | Plan | None = None, instant: bool | None = False) -> str:
         match decision:
             case "Adding Info" | "Removing Info" | "Testing Info":
                 return f'{data_type}  -  instant[{instant}]'
             case "Execute Intention" | "Running Intention" | "Instant Plan":
-                assert trgr is not None
+                assert trgr is not None and trgr.data is not None
                 return f' {chosen_plan}, source[{trgr.data.source}], args{args}'
             case "No Intention":
                 return ""

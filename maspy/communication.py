@@ -82,6 +82,7 @@ class Channel(metaclass=CommsMultiton):
         f_kwargs = "".join(f"{key}={value}" for key, value in kwargs.items())
         msg = f"{self.tcolor}{self._name}> {f_args}{f_kwargs}{bcolors.ENDCOLOR}"
         self.print_queue.put(msg)
+        self.logger.info(msg, extra=self.ch_info)
     
     @property
     def get_info(self):
@@ -90,10 +91,10 @@ class Channel(metaclass=CommsMultiton):
     @property
     def ch_info(self):
         return {
-            "class_name": "Channel",
-            "my_name": self.my_name,
-            "connected_agents": list(self._agents.keys())
-        }
+                "class_name": "Channel",
+                "my_name": self.my_name,
+                "connected_agents": list(self._agents.keys())
+            }
     
     def add_agents(self, agents: Union[List['Agent'],'Agent']):
         if isinstance(agents, list):
@@ -139,7 +140,7 @@ class Channel(metaclass=CommsMultiton):
             self.print(f"Desconnecting Agent {type(agent).__name__}:{"_".join(str(x) for x in agent.tuple_name)}")
         self.logger.info(f'Desconnecting Agent {type(agent).__name__}:{"_".join(str(x) for x in agent.tuple_name)}', extra=self.ch_info)
 
-    def _sendf(self, sender: str, target: str | List[str] | broadcast,  message: Union['Belief', 'Goal', 'Plan'] | List[Union['Belief', 'Goal', 'Plan']], typ: str): 
+    def _sendf(self, sender: str, target: str | List[str] | broadcast,  message: Union['Belief', 'Goal', 'Plan', 'Ask'] | List[Union['Belief', 'Goal', 'Plan']], typ: str): 
         if not isinstance(message, list):
             messages = [message]
         if isinstance(target,str) and target != "self" and not target.split("_")[-1].isdigit():
@@ -150,29 +151,29 @@ class Channel(metaclass=CommsMultiton):
                 object.__setattr__(msg, 'source', sender)
                 if isinstance(target,list):
                     if self.show_exec: self.print(f'{sender} sending {typ}:{msg} to list {target}')
-                    self.logger.info(f'{sender} sending {typ}:{msg} to list {target}', extra=self.ch_info) 
+                    self.logger.info(f'{sender} sending {typ}:{msg} to list {target}', extra=self.ch_info)
                     for trgt in target:
                         assert isinstance(trgt, str) 
                         self._agents[trgt]._save_msg(typ,msg, True)
                         
                 elif is_broadcast(target):
                     if self.show_exec: self.print(f'{sender} broadcasting {typ}:{msg}')
-                    self.logger.info(f'{sender} broadcasting {typ}:{msg}', extra=self.ch_info)  
+                    self.logger.info(f'{sender} broadcasting {typ}:{msg}', extra=self.ch_info) 
                     for agent_name in self._agents.keys():
                         if agent_name != sender and agent_name.split("_")[0] != sender:
                             self._agents[agent_name]._save_msg(typ,msg, True)
                             
                 elif isinstance(target, str):
                     if self.show_exec: self.print(f'{sender} sending {typ}:{msg} to {target}')
-                    self.logger.info(f'{sender} sending {typ}:{msg} to {target}', extra=self.ch_info)  
+                    self.logger.info(f'{sender} sending {typ}:{msg} to {target}', extra=self.ch_info) 
                     self._agents[target]._save_msg(typ,msg, True)
         except AssertionError:
             raise
         except KeyError:
             self.logger.warning(f'Agent {target} not connected to {self.my_name} channel', extra=self.ch_info)
-        self.logger.info(f'Message Sent', extra=self.ch_info) 
+        self.logger.info(f'Message Sent', extra=self.ch_info)
 
-    def _send(self, sender: str, target: str | List[str] | broadcast, act: Act, message: Union['Belief', 'Goal', 'Ask', 'Plan'] | List[Union['Belief', 'Ask', 'Goal', 'Plan']]):  
+    def _send(self, sender: str, target: str | List[str] | type[broadcast], act: Act, message: Union['Belief', 'Goal', 'Ask', 'Plan'] | List[Union['Belief', 'Goal', 'Plan']]) -> None:  
         messages = []
         if isinstance(message, list):
             for m in message:
@@ -186,18 +187,32 @@ class Channel(metaclass=CommsMultiton):
                         assert isinstance(trgt, str)
                         self._sending(sender,trgt,act,msg)
                 elif is_broadcast(target):
+                    extra = self.ch_info
+                    extra.update({
+                            "sender": sender,
+                            "target": "broadcast",
+                            "act": act.name if act is not None else None,
+                            "information": msg.info if msg is not None else None})
+                    self.logger.info(f'{sender} broadcasting {act.name}:{msg}', extra=extra)
+                    if self.show_exec: self.print(f'{sender} broadcasting {act.name}:{msg}')
                     for agent_name in self._agents.keys():
                         if agent_name != sender and agent_name.split("_")[0] != sender:
-                            self._sending(sender,agent_name,act,msg)
+                            self._sending(sender,agent_name,act,msg,False)
                 elif isinstance(target, str):
                     self._sending(sender,target,act,msg)
         except AssertionError:
             raise
-        self.logger.info(f'Message Sent', extra=self.ch_info) 
+        self.logger.info(f'Message Sent', extra=self.ch_info)
     
-    def _sending(self, sender: str, target: str, act: Act, msg: Union['Belief', 'Goal', 'Ask', 'Plan']):
-        if self.show_exec: self.print(f'{sender} sending {act.name}:{msg} to {target}')
-        self.logger.info(f'{sender} sending {act.name}:{msg} to {target}', extra=self.ch_info)   
+    def _sending(self, sender: str, target: str, act: Act, msg: Union['Belief', 'Goal', 'Ask', 'Plan'], broadcast_flag: bool = True) -> None:
+        if self.show_exec and broadcast_flag: self.print(f'{sender} sending {act.name}:{msg} to {target}')
+        extra = self.ch_info
+        extra.update({
+                "sender": sender,
+                "target": target,
+                "act": act.name if act is not None else None,
+                "information": msg.info if msg is not None else None})
+        self.logger.info(f'{sender} sending {act.name}:{msg} to {target}', extra=extra)   
 
         from maspy.agent import Belief, Goal, Ask, Plan
         try:
@@ -215,7 +230,7 @@ class Channel(metaclass=CommsMultiton):
         except AssertionError:
             raise
     
-    def _parse_sent_msg(self, sender: str, act: Act, msg: Union['Belief', 'Goal', 'Ask', 'Plan']):
+    def _parse_sent_msg(self, sender: str, act: Act, msg: Union['Belief', 'Goal', 'Ask', 'Plan']) -> Union['Belief', 'Goal', 'Ask', 'Plan']:
         from maspy.agent import Belief, Goal, Ask
         if isinstance(msg, Belief | Goal) and msg is not None:
             object.__setattr__(msg, 'source', sender)

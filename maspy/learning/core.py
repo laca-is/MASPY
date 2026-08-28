@@ -8,12 +8,14 @@ ObsType = TypeVar("ObsType")
 ActType = TypeVar("ActType")
 
 class HashableWrapper:
-    def __init__(self, obj):
-        self.original = obj
-        self.original_type = type(obj)
-        self.hashable = self._make_hashable(obj)
+    """ Wrapper for hashable objects """
+    def __init__(self, obj: Any) -> None:
+        self.original: Any = obj
+        self.original_type: type = type(obj)
+        self.hashable: Any = self._make_hashable(obj)
 
-    def _make_hashable(self, obj):
+    def _make_hashable(self, obj: Any) -> Any:
+        """ Make an object hashable """
         if isinstance(obj, dict):
             return frozenset((k, self._make_hashable(v)) for k, v in obj.items())
         elif isinstance(obj, (tuple)):
@@ -40,7 +42,6 @@ class HashableWrapper:
 
 
 class Model(Generic[ObsType, ActType]):
-    
     action_space: Space[ActType]
     observation_space: Space[ObsType]
     initial_state_distrib: list[HashableWrapper]
@@ -53,12 +54,14 @@ class Model(Generic[ObsType, ActType]):
     _np_random_seed: int | None = None
 
     def look(self, action: ActType) -> Tuple[tuple, SupportsFloat, bool, bool, dict[str, Any]]:
+        """ Look at a action step in the model """
         transitions = self.P[self.curr_state][action]
         i = categorical_sample([t[0] for t in transitions], self.np_random)
         p, s, r, t = transitions[i]
         return s, r, t, False, {"prob": p}#, "action_mask": self.action_mask(s)})
 
     def step(self, action: ActType) -> Tuple[HashableWrapper, SupportsFloat, bool, bool, dict[str, Any]]:
+        """ Take a action step in the model """
         try:
             transitions = self.P[self.curr_state][action]
             #print(f'\n## Transitions > {self.curr_state} : {action} [{self.P[self.curr_state]}] = {transitions}')
@@ -76,6 +79,7 @@ class Model(Generic[ObsType, ActType]):
         return self.curr_state, r, t, False, {"prob": p}
         
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> Tuple[tuple | HashableWrapper, dict[str, Any]]: # type: ignore
+        """ Reset the model to an initial state """
         if seed is not None:
             self._np_random, self._np_random_seed = utl_np_random(seed)
         
@@ -85,10 +89,11 @@ class Model(Generic[ObsType, ActType]):
         assert self.curr_state is not None, "State cannot be None after reset"
         return self.curr_state, {"prob": 1.0}
 
-    def set_state(self, state) -> Tuple[HashableWrapper, dict]: 
+    def set_state(self, state: ObsType) -> Tuple[HashableWrapper, dict]: 
+        """ Set the current state """
         if not isinstance(state, HashableWrapper):
-            state = HashableWrapper(state)
-        self.curr_state = state
+            stt = HashableWrapper(state) 
+        self.curr_state = stt
         self.last_action = None
         
         return self.curr_state, {"prob": 1.0}#, "action_mask": self.action_mask(self.s)}

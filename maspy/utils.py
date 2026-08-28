@@ -1,15 +1,46 @@
 from __future__ import annotations
 from typing import Any, Callable, Optional, TYPE_CHECKING
-from threading import Lock
+from collections.abc import Mapping
+import threading
 import re
 import ast
 
 if TYPE_CHECKING:
     from maspy.agent import Belief, Goal
 
+_DICT = "__frozen_dict__"
+_SET = "__frozen_set__"
+_LIST = "__frozen_list__"
+_TUPLE = "__frozen_tuple__"
+
+def freeze_obj(obj: Any) -> Any:
+    if isinstance(obj, Mapping):
+        return (_DICT, tuple((freeze_obj(k), freeze_obj(v)) for k, v in obj.items()))
+    elif isinstance(obj, set):
+        return (_SET, tuple(freeze_obj(x) for x in obj))
+    elif isinstance(obj, list):
+        return (_LIST, tuple(freeze_obj(x) for x in obj))
+    elif isinstance(obj, tuple):
+        return (_TUPLE, tuple(freeze_obj(x) for x in obj))
+    else:
+        return obj
+
+def unfreeze_obj(obj: Any) -> Any:
+    if isinstance(obj, tuple) and obj:
+        tag = obj[0]
+        if tag == _DICT:
+            return {unfreeze_obj(k): unfreeze_obj(v) for k, v in obj[1]}
+        elif tag == _SET:
+            return {unfreeze_obj(x) for x in obj[1]}
+        elif tag == _LIST:
+            return [unfreeze_obj(x) for x in obj[1]]
+        elif tag == _TUPLE:
+            return tuple(unfreeze_obj(x) for x in obj[1])
+    return obj
+
 class bcolorsMeta(type):
     _instances: dict[str, Any] = {}
-    _lock: Lock = Lock()
+    _lock: threading.Lock = threading.Lock()
 
     def __call__(cls, *args, **kwargs):
         with cls._lock:
@@ -75,31 +106,31 @@ class Condition:
         self.left_value = left_value
         self.right_value = right_value
     
-    def __invert__(self):
+    def __invert__(self) -> Condition:
         return Condition("~", "~", self)
     
-    def __and__(self, other):
+    def __and__(self, other: Condition | Belief | Goal) -> Condition:
         return Condition("op", "&",self, other, lambda x,y: x & y)
         
-    def __or__(self, other):
+    def __or__(self, other: Condition | Belief | Goal) -> Condition:
         return Condition("op", "|", self, other, lambda x,y: x | y)
     
-    def __xor__(self, other):
+    def __xor__(self, other: Condition | Belief | Goal) -> Condition:
         return Condition("op", "^", self, other, lambda x,y: x ^ y)
     
-    def __lt__(self, other):
+    def __lt__(self, other: Condition | Belief | Goal) -> Condition:
         return Condition("comp", "<", self,other, lambda x,y: x < y)
     
-    def __le__(self, other):
+    def __le__(self, other: Condition | Belief | Goal) -> Condition:
         return Condition("comp", "<=", self,other, lambda x,y: x <= y)
     
-    def __gt__(self, other):
+    def __gt__(self, other: Condition | Belief | Goal) -> Condition:
         return Condition("comp", ">", self,other, lambda x,y: x > y)
     
-    def __ge__(self, other):
+    def __ge__(self, other: Condition | Belief | Goal) -> Condition:
         return Condition("comp", ">=", self,other, lambda x,y: x >= y)
     
-    def __ne__(self, value):
+    def __ne__(self, value: Belief | Goal) -> Condition: # type: ignore [override]
         return Condition("comp", "!=", self,value, lambda x,y: x != y)
     
     def __str__(self) -> str:
@@ -108,8 +139,49 @@ class Condition:
         else:
             return f'({self.left_value} {self.str_type} {self.right_value})'
     
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__str__()
+
+class RWLock:
+    """Multiple simultaneous readers, exclusive writers."""
+    def __init__(self):
+        self._read_ready = threading.Condition(threading.Lock())
+        self._readers = 0
+
+    def acquire_read(self):
+        with self._read_ready:
+            self._readers += 1
+
+    def release_read(self):
+        with self._read_ready:
+            self._readers -= 1
+            if self._readers == 0:
+                self._read_ready.notify_all()
+
+    def acquire_write(self):
+        self._read_ready.acquire()
+        while self._readers > 0:
+            self._read_ready.wait()
+
+    def release_write(self):
+        self._read_ready.release()
+
+    # Context managers for convenience
+    from contextlib import contextmanager
+
+    def reading(self):
+        self.acquire_read()
+        try:
+            yield
+        finally:
+            self.release_read()
+
+    def writing(self):
+        self.acquire_write()
+        try:
+            yield
+        finally:
+            self.release_write()
 
 def fill_anys(template: str, values_str: str) -> str:
     values = ast.literal_eval(values_str)
@@ -135,7 +207,6 @@ def merge_dicts(dict1: dict[Any, dict[Any, set[Any]]] | None, dict2: dict[Any, d
         else:
             dict2[key] = value
     return dict2
-
 
 def set_changes(original:set, changes:set):
     intersection = original.intersection(changes)

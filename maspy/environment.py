@@ -2,10 +2,11 @@ from threading import Lock
 from typing import Dict, Set, List, TYPE_CHECKING, Union, Optional, Any, Sequence, Callable
 from dataclasses import dataclass, field
 from collections.abc import Iterable
-from maspy.utils import manual_deepcopy, merge_dicts, bcolors
+from maspy.utils import manual_deepcopy, merge_dicts, freeze_obj, unfreeze_obj, bcolors
 from logging import getLogger
 from maspy.learning.modelling import Group
 from itertools import product, combinations, permutations
+from threading import Event
 import inspect
 
 if TYPE_CHECKING:
@@ -21,6 +22,7 @@ class Percept:
     _group: str | Group = DEFAULT_GROUP
     adds_event: bool = True
     source: str = field(default_factory=str)
+    v_len: int = 0
     
     @property
     def values(self):
@@ -36,6 +38,16 @@ class Percept:
         return len(self._values)
 
     @property
+    def info(self) -> dict:
+        return {
+            "data_type": "Percept",
+            "name": self.name,
+            "values": self._values,
+            "group": self.group,
+            "source": self.source
+        }
+
+    @property
     def group(self):
         if isinstance(self._group, str):
             return self._group
@@ -46,6 +58,7 @@ class Percept:
             return ""
     
     def __post_init__(self):
+        object.__setattr__(self, "v_len", len(self._values) if isinstance(self._values, tuple) else 1)
         match self._values:
             case list() | dict() | str():
                 object.__setattr__(self, "_values", tuple([self._values]))
@@ -56,6 +69,34 @@ class Percept:
             case _:
                 object.__setattr__(self, "_values", tuple([self._values]))
     
+    def change(self, name: str|None = None, values: Any|None = None, group: str|None = None, adds_event: bool|None = None, source: str|None = None) -> None:
+        frame = inspect.currentframe()
+        caller_frame = frame.f_back if frame else None
+        assert caller_frame
+        caller_locals = caller_frame.f_locals
+        caller_instance = caller_locals.get('self', None) if caller_locals else None
+        caller_method = caller_frame.f_code.co_name
+        args, _, _, vls = inspect.getargvalues(caller_frame)
+        args_s = ", ".join(f'{arg}={vls[arg]}' for arg in args if arg != "self")
+        if isinstance(caller_instance, Environment):
+            old_percept = self.info
+            old_str = f'{self}'
+            self.name = name if name is not None else self.name
+            self._values = values if values is not None else self._values
+            self._group = group if group is not None else self.group
+            self.source = source if source is not None else self.source
+            self.adds_event = adds_event if adds_event is not None else self.adds_event
+            
+            extras = caller_instance.env_info
+            extras.update({"Old Percept": old_percept, "New Percept": self.info, "action_name":caller_method})
+            extras.update({"action_args": dict(vls)})
+            #if caller_instance.show_exec:
+            caller_instance.print(f'Changing percept: {old_str} to {self}')
+            caller_instance.logger.info('Changing Percept', extra=extras)
+            #caller_instance._notify_change()
+        else:
+            print(f"{type(caller_instance)}, not an Environment instance, trying to change {self}")
+
     def __hash__(self) -> int:
         values_hashable = []
         for value in self._values:
@@ -82,33 +123,62 @@ class Percept:
 
 @dataclass
 class State:
-    _state_type: Group
-    key: str
-    data: Sequence[Any]
+    """Represents a State of the Environment for Modelling"""
+    _state_type: Group = Group.listed
+    name: str = field(default_factory=str)
+    data: Sequence[Any] = field(default_factory=tuple)
+    
+    @property
+    def state_type(self) -> str:
+        if isinstance(self._state_type, str):
+            return self._state_type
+        elif isinstance(self._state_type, Group):
+            return self._state_type.name
+        else:
+            print(f"STATE GROUP TYPE ERROR {type(self._state_type)}:{self._state_type}")
+            return ""
     
 @dataclass
 class Action:
+    """Represents an Action of the Environment for Modelling"""
     _act_type: Group
     data: Sequence[Any]
     transition: Callable
     func: Callable = lambda _: {} 
     
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         match self.data:
             case int() | str():
                 object.__setattr__(self, "data", [self.data])
     
     @property
-    def act_type(self):
+    def act_type(self) -> str:
         if isinstance(self._act_type, str):
             return self._act_type
         elif isinstance(self._act_type, Group):
             return self._act_type.name
         else:
-            print(f"GROUP TYPE ERROR {type(self._act_type)}:{self._act_type}")
+            print(f"ACTION GROUP TYPE ERROR {type(self._act_type)}:{self._act_type}")
             return ""
 
 def action(act_type: Group, data: Sequence[Any], transition: Callable) -> Callable:
+    """ 
+    The Decorator for Actions inteded to be learned upon.
+
+    Parameters
+    ----------
+        act_type : Group
+            The type of the Action
+        data : Sequence[Any]
+            The data of the Action
+        transition : Callable
+            The transition function of the Action   
+        
+    Returns
+    -------
+        Callable
+            The decorated function
+    """
     class decorator:
         def __init__(self,func):
             self.func = func
@@ -137,27 +207,30 @@ class EnvironmentMultiton(type):
             return cls._instances[env_name]
         return None
 
-    def __call__(cls, env_name=None,full_log=False):
+    def __call__(cls, *args: Any, **kwargs: Any):
+        env_name = args[0] if args else kwargs.get("env_name")
+        if not isinstance(env_name, str): env_name = type(cls).__name__
         with cls._lock:
-            _my_name = env_name if env_name else str(cls.__name__)
-            if _my_name not in cls._instances:
-                vars = []
-                if env_name: 
-                    vars.append(env_name)
-                if full_log: 
-                    vars.append(full_log)
-                instance = super().__call__(*vars)
-                cls._instances[_my_name] = instance
-        return cls._instances[_my_name]
+            if env_name not in cls._instances:
+                instance = super().__call__(*args, **kwargs)
+                cls._instances[env_name] = instance
+        
+        return cls._instances[env_name]
 
 class Environment(metaclass=EnvironmentMultiton):
     """Used for the modelling of the Environments in which Agents act and perceive.
     
     Each instance with a unique name is a distinct Environment.
     """
-    def __init__(self, env_name: Optional[str]=None, full_log: bool=False):
+    def __init__(self, 
+                env_name: Optional[str]=None,
+                *,
+                percepts: Optional[Iterable[Percept]]=None,
+                show_exec: bool=False,
+                logging: bool=False
+                ):
         self.my_name = env_name if env_name else type(self).__name__
-        self.show_exec = full_log
+        self.show_exec = show_exec
         self.printing = True
         self.lock = Lock()
         self.tcolor = ""
@@ -174,20 +247,62 @@ class Environment(metaclass=EnvironmentMultiton):
         self._name = f"Environment:{self.my_name}"
         self.perceiving_agents: int = 0
         self._percepts: Dict[str, Dict[str, Set[Percept]]] = dict()
+        self.percept_list: List[Percept] = []
         
         self.possible_starts: dict | str = dict()
         self._actions: List[Action]
-        self._states: Dict[str, list] = dict()
+        self._states: Dict[str, List[State]] = dict()
         self._state_percepts: Dict[str, Percept] = dict()
         try:    
             if not self._actions:
                 self._actions = []
         except AttributeError:
             self._actions = []
-        self.print(f"Environment {self.my_name} created")
+        
+        if percepts:
+            self.logger.debug(f"Adding Initial Percepts: {percepts}", extra=self.env_info)
+            self.create(percepts)    
+        
+        self.print(f"Environment {self.my_name} created \n{percepts, show_exec, logging}")
         self.logger.info(f"Environment {self.my_name} created", extra=self.env_info)
     
-    def print(self,*args, **kwargs):
+    def __init_subclass__(cls):
+        old_init = cls.__init__
+
+        def new_init(self, *args, **kwargs):
+            old_init(self, *args, **kwargs)
+            if hasattr(self, "_post_init"):
+                self._post_init()
+
+        cls.__init__ = new_init
+
+    def _post_init(self):
+        if self._states and self.possible_starts != "off-policy":
+            assert isinstance(self.possible_starts, dict), f"possible_starts must be a dict when not off-policy {type(self.possible_starts)}:{self.possible_starts}"
+            self.start_states = list(self.possible_starts.values())
+            for percept in self._state_percepts.values():
+                if percept.name not in self.possible_starts:
+                    states = self._states[percept.name][0].data
+                    self.start_states.append(states)
+                    self.possible_starts[percept.name] = states
+            
+            normalized = [ 
+                [item] if not isinstance(item, list | tuple | set) 
+                else list(item) for item in self.start_states
+            ]
+            
+            self.initial_dist = list(product(*normalized))    
+            from numpy import random  
+            start_state = self.initial_dist[random.randint(0, len(self.initial_dist))] 
+
+            for stt, (name, _) in zip(start_state, self.possible_starts.items()):
+                percept = self.get(Percept(name),ck_values=False)
+                if isinstance(stt, frozenset):
+                    stt = dict(stt)
+                percept.change(values=stt)
+            #print(f'{self._name} states: {self._states} possible_starts: {self.possible_starts} start_states: {self.start_states} initial_dist: {self.initial_dist}')
+    
+    def print(self,*args: Any, **kwargs: Any) -> None:
         """Formatted MASPY Print Function"""
         if not self.printing:
             return 
@@ -195,6 +310,7 @@ class Environment(metaclass=EnvironmentMultiton):
         f_kwargs = "".join(f"{key}={value}" for key, value in kwargs.items())
         msg = f"{self.tcolor}{self._name}> {f_args}{f_kwargs}{bcolors.ENDCOLOR}"
         self.print_queue.put(msg)
+        self.logger.info(msg, extra=self.env_info)
     
     @property
     def get_info(self):
@@ -208,6 +324,13 @@ class Environment(metaclass=EnvironmentMultiton):
         return {"percepts": percept_list, "connected_agents": list(self._agents.keys()).copy()}
     
     def _perception(self) -> Dict[str, Dict[str, Set[Percept]]]:
+        """Returns a copy of the environment's percepts
+        
+        Returns
+        -------
+        Dict[str, Dict[str, Set[Percept]]]
+            A copy of the environment's percepts
+        """
         with self.lock:
             self.perceiving_agents += 1
         percepts = manual_deepcopy(self._percepts)
@@ -216,7 +339,7 @@ class Environment(metaclass=EnvironmentMultiton):
         return percepts
 
     @property
-    def print_percepts(self):
+    def print_percepts(self) -> None:
         """
         Prints all the environment's current percepts
         """
@@ -228,37 +351,73 @@ class Environment(metaclass=EnvironmentMultiton):
         self.print(f"{percepts}\r")
         
     @property
-    def print_actions(self):
+    def print_actions(self) -> None:
+        """ 
+        Prints all the environment's current actions
+        """
         actions = ""
         for action in self._actions:
             actions += f"{action}\n"
         print(f"{actions}\r")
     
     @property
-    def env_info(self):
+    def env_info(self) -> dict:
+        """ 
+        Returns information about the environment used for logging
+        
+        Returns
+        -------
+        dict
+            The Information about the environment
+        """
         return {
             "class_name": "Environment",
             "my_name": self.my_name,
-            "percepts": [percept for percept in [percept_set for percept_set in self._percepts.values()]],
+            "percepts": [prcpt.info for prcpt in self.percept_list],
             "connected_agents": list(self._agents.keys())
         }
         
-    def _check_caller(self):
+    def _check_caller(self) -> tuple[str, str]:
+        """ 
+        Returns the caller's method name and arguments
+        
+        Returns
+        -------
+        tuple[str, str]
+            The caller's method name and arguments
+        """
         frame = inspect.currentframe()
+        assert frame and frame.f_back
         caller_frame = frame.f_back.f_back 
+        assert caller_frame
         caller_method = caller_frame.f_code.co_name
-        args, _, _, values = inspect.getargvalues(caller_frame)
+        args, a, b, values = inspect.getargvalues(caller_frame)
+        #print(args,a,b,values)
         args_s = ", ".join(f'{arg}={values[arg]}' for arg in args if arg != "self")
         return caller_method, args_s
     
-    def add_agents(self, agents: Union[List['Agent'],'Agent']):
+    def add_agents(self, agents: Union[List['Agent'],'Agent']) -> None:
+        """ Adding agents to the environment
+        
+        Parameters
+        ----------
+        agents : Iterable[Agent] | Agent
+            The agents to be added
+        """
         if isinstance(agents, list):
             for agent in agents:
                 self._add_agent(agent)
         else:
             self._add_agent(agents)
     
-    def _add_agent(self, agent: 'Agent'):
+    def _add_agent(self, agent: 'Agent') -> None:
+        """ Actually adding an agent to the environment
+        
+        Parameters
+        ----------
+        agent : Agent
+            The agent to be added
+        """
         assert isinstance(agent.tuple_name, tuple)
         ag_name = f'{agent.tuple_name[0]}_{str(agent.tuple_name[1])}'
         if type(agent).__name__ in self.agent_list:
@@ -277,9 +436,15 @@ class Environment(metaclass=EnvironmentMultiton):
             self.print(f'Connecting Agent {type(agent).__name__}:{"_".join(str(x) for x in agent.tuple_name)}')
         self.logger.info(f'Connecting Agent {type(agent).__name__}:{"_".join(str(x) for x in agent.tuple_name)}', extra=self.env_info)
     
-    def _rm_agents(
-        self, agents: Union[Iterable['Agent'], 'Agent']
-    ) -> None:
+    def rm_agents(self, agents: Union[Iterable['Agent'], 'Agent']) -> None:
+        """ 
+        Removes a agent or a iterable data of agents from the environment
+
+        Parameters
+        ----------
+            agents : Iterable[Agent] | Agent
+                The agent(s) to be removed
+        """
         if isinstance(agents, list):
             for agent in agents:
                 self._rm_agent(agent)
@@ -288,7 +453,15 @@ class Environment(metaclass=EnvironmentMultiton):
             assert isinstance(agents, Agent)
             self._rm_agent(agents)
 
-    def _rm_agent(self, agent: 'Agent'):
+    def _rm_agent(self, agent: 'Agent') -> None:
+        """ 
+        Actually removing each agent from the environment
+
+        Parameters
+        ----------
+            agent : Agent
+                The agent to be removed
+        """
         ag_name = f'{agent.tuple_name[0]}_{str(agent.tuple_name[1])}'
         if ag_name in self._agents:
             assert isinstance(agent.tuple_name, tuple)
@@ -298,7 +471,13 @@ class Environment(metaclass=EnvironmentMultiton):
             self.print(f'Disconnecting Agent {type(agent).__name__}:{"_".join(str(x) for x in agent.tuple_name)}')
         self.logger.info(f'Disconnecting Agent {type(agent).__name__}:{"_".join(str(x) for x in agent.tuple_name)}', extra=self.env_info)
     
-    def create(self, percept: List[Percept] | Percept):
+    def _notify_change(self):
+        for agent in self._agents.values():
+            with agent.env_lock:
+                agent._env_changed[self.my_name] = True
+                agent._env_changed_count += 1
+    
+    def create(self, percept: Iterable[Percept] | Percept):
         """
         Creates one or multiple new percept(s) on the environment
 
@@ -314,40 +493,50 @@ class Environment(metaclass=EnvironmentMultiton):
         with self.lock:
             self._percepts = aux_percepts
         
-        if isinstance(percept, list):
+        if isinstance(percept, Iterable):
             for prcpt in percept:
+                self.percept_list.append(prcpt)
                 if prcpt.group in Group:
                     self._add_state(prcpt)
-        elif percept.group in Group._member_names_:
-            self._add_state(percept)    
+        else:
+            self.percept_list.append(percept)
+            if percept.group in Group._member_names_:
+                self._add_state(percept)    
         
         action, agt = self._check_caller()
         extras = self.env_info
-        extras.update({"percept(s)": str(percept), "action":action, "agent": agt})
-        if self.show_exec:
-            self.print(f'Creating {percept}')
+        extras.update({"Create Percept(s)": percept, "action":action, "agent": agt})
+        #if self.show_exec:
+        self.print(f'Creating {percept}')
         self.logger.info('Creating Percept', extra=extras)
+        #self._notify_change()
         
+    def _add_state(self, percept: Percept) -> None:
+        """
+        Adds a new state to the environment
         
-    
-    def _add_state(self, percept: Percept):
+        Parameters
+        ----------
+            percept : Percept
+                The percept to be added as a State
+        """
         self._state_percepts[percept.name] = percept
         match percept.group:
             case "listed":
-                states = percept.values
+                states = State(Group.listed, percept.name, percept.values)
             case "combination":
-                if percept.values_len == 2 and isinstance(percept.values[0], Sequence) and isinstance(percept.values[1], int):
+                if percept.v_len == 2 and isinstance(percept.values[0], Sequence) and isinstance(percept.values[1], int):
                     comb = list(combinations(percept.values[0], percept.values[1]))
                 else:
                     comb = []
                     for i in range(1, len(percept.values) + 1):
                         comb.extend(combinations(percept.values, i))
-                states = comb
+                states = State(Group.combination, percept.name, comb)
             case "permutation":
                 perm: list = []
                 for i in range(1, len(percept.values) + 1):
                     perm.extend(permutations(percept.values, i))
-                states = perm
+                states = State(Group.permutation, percept.name, perm)
             case "cartesian":
                 ranges: list = []
                 for arg in percept._values:
@@ -360,13 +549,14 @@ class Environment(metaclass=EnvironmentMultiton):
                     else:
                         self.logger.warning(f'{arg}:{type(arg)} is not a valid type',extra=self.env_info)
                 cart = list(product(*ranges))
-                states = cart
+                states = State(Group.cartesian, percept.name, cart)
+        
         if percept.name in self._states:
-            self._states[percept.name] += states
+            self._states[percept.name].append(states)
         else: 
-            self._states[percept.name] = states
-                        
-    def get(self, percept:Percept, all=False, ck_group=False, ck_values=True) -> List[Percept] | Percept | None:
+            self._states[percept.name] = [states]
+               
+    def get(self, percept:Percept, all: bool=False, ck_group: bool=False, ck_values: bool=True) -> List[Percept] | Percept | None:
         """
         Retrieves from the environment one or multiple percepts that match the given parameters
 
@@ -405,12 +595,49 @@ class Environment(metaclass=EnvironmentMultiton):
             caller_frame = current_frame.f_back
             assert caller_frame is not None
             caller_function_name = caller_frame.f_code.co_name
-            if caller_function_name in {'change'}:
+            if caller_function_name in {'change','has'}:
                 return None
             self.print(f'Does not contain Percept like {percept}. Searched during {caller_function_name}()')
             return None
-                    
+    
+    def has(self, percept: Percept, ck_group: bool=False, ck_values: bool=True) -> bool:
+        """ 
+        Checks if the environment contains a percept that matches the given parameters
+        
+        Parameters
+        ----------
+            percept: Percept
+                The percept to search for.
+            ck_group (bool, optional)
+                Whether to check the group of the percept. Defaults to False.
+            ck_values (bool, optional)
+                Whether to check the arguments of the percept. Defaults to True.
+
+        Returns
+        -------
+            bool: True if the environment contains a percept that matches the given parameters, False otherwise
+        """
+        return self.get(percept, all=False, ck_group=ck_group, ck_values=ck_values) is not None
+    
     def _compare_data(self, data1: Percept, data2: Percept, ck_group:bool,ck_args:bool) -> bool:
+        """ 
+        Compares two percepts
+
+        Parameters
+        ----------
+            data1: Percept
+                The first percept to compare.
+            data2: Percept
+                The second percept to compare.
+            ck_group (bool, optional)
+                Whether to check the group of the percept. Defaults to False.
+            ck_args (bool, optional)
+                Whether to check the arguments of the percept. Defaults to True.
+
+        Returns
+        -------
+            bool: True if the percepts are compatible, False otherwise
+        """
         self.print(f"Comparing: \n\t{data1} and {data2}") if self.show_exec else ...
         if ck_group and data1.group != data2.group:
             self.print("Failed at group") if self.show_exec else ...
@@ -420,7 +647,7 @@ class Environment(metaclass=EnvironmentMultiton):
             return False
         if not ck_args:
             return True
-        if data1.values_len != data2.values_len:
+        if data1.v_len != data2.v_len:
             self.print("Failed at args_len") if self.show_exec else ...
             return False
         for arg1,arg2 in zip(data1._values,data2._values):
@@ -433,50 +660,10 @@ class Environment(metaclass=EnvironmentMultiton):
             self.print("Data is Compatible") if self.show_exec else ...
             return True
     
-    def change(self, old_percept:Percept, new_values:tuple | Any):
-        """
-        Changes the values of a percept
-
-        Parameters
-        ----------
-            old_percept : Percept
-                The percept to be changed.
-            new_values : (tuple | Any)
-                The new arguments for the old percept
-        """
-        if type(new_values) is not tuple: 
-            new_values = (new_values,) 
-        if old_percept.values_len > 0:
-            percept = self.get(old_percept)
-        else:
-            percept = self.get(old_percept,ck_values=False)
-            
-        assert isinstance(percept, Percept)
-        aux_percept = percept.values
-        with self.lock:
-            if isinstance(percept, Percept):
-                percept._values = new_values
-                
-        assert isinstance(percept, Percept)        
-        if percept.name in self._state_percepts:
-            del self._state_percepts[percept.name]
-            del self._states[percept.name]     
-        if percept.group in Group._member_names_:
-            self._add_state(percept)
-        action, agt = self._check_caller()
-        extras = self.env_info
-        info = {"old_percept": f"Percept('{percept.name}', ('{aux_percept}',), '{percept.source}')", "new_percept": str(percept), "action":action, "agent": agt}
-        extras.update(info)
-        if self.show_exec:
-            self.print(f"Changing Percept('{percept.name}', ('{aux_percept}',), '{percept.source}') to {percept}")
-        self.logger.info(f"Changing Percept", extra=extras)
-            
-    def _percept_exists(self, key, args, group=DEFAULT_GROUP) -> bool:
-        if type(args) is not tuple: 
-            args = (args,)
-        return Percept(key,args,group) in self._percepts[group][key]
-
-    def delete(self, percept: List[Percept] | Percept):
+    def change(self, percept: Percept, name: str|None = None, values: Any|None = None, group: str|None = None, adds_event: bool|None = None, source: str|None = None) -> None:
+        percept.change(name=name, values=values, group=group, adds_event=adds_event, source=source)
+         
+    def delete(self, percept: Iterable[Percept] | Percept) -> None:
         """
         Deletes one or multiple percepts from the environment
 
@@ -488,10 +675,12 @@ class Environment(metaclass=EnvironmentMultiton):
         self.print(self._check_caller())
         assert percept is not None, f'Percept given to be deleted is None'
         try:
-            if isinstance(percept, list):
+            if isinstance(percept, Iterable):
                 for prcpt in percept:
+                    self.percept_list.remove(prcpt)
                     self._percepts[prcpt.group][prcpt.name].remove(prcpt)
             else:
+                self.percept_list.remove(percept)
                 self._percepts[percept.group][percept.name].remove(percept)
             action, agt = self._check_caller()
             extra = self.env_info
@@ -501,8 +690,22 @@ class Environment(metaclass=EnvironmentMultiton):
             self.logger.info(f'Deleting Percept', extra=extra)
         except KeyError:
             self.logger.warning(f'{percept} doesnt exist, cannot be deleted',extra=self.env_info)
+        #self._notify_change()
               
     def _clean(self, percept_data: Iterable[Percept] | Percept) -> Dict[str, Dict[str, set]]:
+        """
+        Cleans the percept data by adding the source of the percept
+
+        Parameters
+        ----------
+            percept_data : Iterable[Percept] | Percept
+                The percept data to be cleaned
+
+        Returns
+        -------
+            Dict[str, Dict[str, set]]
+                The cleaned percept data
+        """
         match percept_data:
             case None:
                 return dict()

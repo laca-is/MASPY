@@ -22,10 +22,10 @@ class Space(Generic[Cov_Type]):
             dtype: npt.DTypeLike | None = None, 
             seed: int | np.random.Generator | None = None
         ):
-        self._shape = None if shape is None else tuple(shape)
-        self.dtype = None if dtype is None else np.dtype(dtype)
+        self._shape: tuple[int, ...] | None = None if shape is None else tuple(shape)
+        self.dtype: npt.DTypeLike = None if dtype is None else np.dtype(dtype)
         
-        self._np_random = None
+        self._np_random: np.random.Generator | None = None
         if seed is not None:
             if isinstance(seed, np.random.Generator):
                 self._np_random = seed
@@ -70,8 +70,8 @@ class Discrete(Space[np.int64]):
         assert n > 0, "n (counts) have to be positive"
         assert np.issubdtype(type(start), np.integer), f"Expected integer type, actual type: {type(start)}"
         
-        self.n = np.int64(n)
-        self.start = np.int64(start)
+        self.n: np.int64 = np.int64(n)
+        self.start: np.int64 = np.int64(start)
         super().__init__((), np.int64, seed)
     
     def sample(self, mask: MaskNDArray | None = None) -> np.int64:

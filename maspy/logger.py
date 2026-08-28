@@ -33,6 +33,7 @@ LOG_RECORD_BUILTIN_ATTRS = {
 }
 
 class QueueListener(Handler):
+    """Logging handler that saves records on a queue."""
     _instance = None
     _lock = Lock()
 
@@ -42,24 +43,41 @@ class QueueListener(Handler):
                 cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         if not hasattr(self, "records"):
             super().__init__(*args, **kwargs)
-            self.records = []
+            self.records: list[str] = []
 
-    def emit(self, record):
+    def emit(self, record: LogRecord) -> None:
+        """
+        Emit a record.
+
+        Parameters
+        ----------
+            record : logging.LogRecord
+                A record to emit
+        """
         self.records.append(self.format(record))
 
-    def get_records(self):
+    def get_records(self) -> list[str]:
+        """
+        Get the log records
+
+        Returns
+        -------
+            list[str]
+                A list of log records
+        """
         logs = self.records[:]
         self.records.clear()
         return logs 
 
 class MyJSONFormatter(Formatter):
+    """ MASPY Custom JSON formatter """
     def __init__(self, *, fmt_keys: Dict[str, str] | None = None):
         super().__init__()
-        self._start_time = perf_counter()
-        self.fmt_keys = fmt_keys if fmt_keys is not None else {}
+        self._start_time: float = perf_counter()
+        self.fmt_keys: Dict[str, str] = fmt_keys if fmt_keys is not None else {}
     
     @override
     def format(self, record: LogRecord) -> str:
@@ -69,12 +87,46 @@ class MyJSONFormatter(Formatter):
     
     @staticmethod
     def _format_clock(elapsed: float) -> str:
+        """
+        Format the elapsed time in hours, minutes, seconds, and milliseconds
+
+        Parameters
+        ----------
+            elapsed : float
+                The elapsed time in seconds
+        
+        Returns
+        -------
+            str
+                The elapsed time in hours, minutes, seconds, and milliseconds
+        """
         hours, rem = divmod(elapsed, 3600)
         minutes, rem = divmod(rem, 60)
         seconds, millis = divmod(rem, 1)
         return f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}.{int(millis * 1000):03d}"
     
+    def _sanitize(self, val: Any) -> Any:
+        """Ensure a value is JSON-safe, stringify if not."""
+        try:
+            dumps(val)
+            return val
+        except (TypeError, ValueError):
+            return str(val)
+    
     def _prepare_log_dict(self, record: LogRecord) -> Dict[str, str | Any]:
+        """ 
+        Prepare the log dictionary
+        
+        Parameters
+        ----------
+            record : logging.LogRecord
+                A record to prepare
+        
+        Returns
+        -------
+            Dict[str, str | Any]
+                The prepared log dictionary
+        """
         elapsed = perf_counter() - self._start_time
         clock = self._format_clock(elapsed)
         always_fields = {
@@ -98,6 +150,6 @@ class MyJSONFormatter(Formatter):
         
         for key, val in record.__dict__.items():
             if key not in LOG_RECORD_BUILTIN_ATTRS:
-                desc[key] = val
+                desc[key] = self._sanitize(val)
         
         return desc
