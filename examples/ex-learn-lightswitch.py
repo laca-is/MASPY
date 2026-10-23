@@ -18,7 +18,7 @@ class LightSwitch(Environment):
         
     @action(listed, ("on","off"), switch_transition)
     def switch(self, agt, option: str):	
-        switch = self.get(Percept("switch",Any))
+        switch = self.get(Percept("switch"), ck_values=False)
         assert isinstance(switch, Percept)
         self.print(f'Light is {switch.values}')
         if switch.values == "on" and option == "off":
@@ -31,7 +31,10 @@ class LightSwitch(Environment):
 class Flipper(Agent):
     @pl(gain, Goal("flipSwitch"))
     def flipSwitch(self, src):
-        self.best_action("LightSwitch")
+        best_action = self.get_best_action("LightSwitch")
+        if best_action is not None:
+            action, _ = best_action
+            self.switch(action)
         self.stop_cycle()
     
 if __name__ == "__main__":
