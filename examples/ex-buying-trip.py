@@ -1,16 +1,16 @@
 from maspy import *
 from random import randint
 
-cnd = lambda *args, **kwargs: (args, kwargs)
-
 class Website(Environment):
     def announce_trip(self, agt, trip):
         self.print(f"Trip announced by {agt}: {trip}")
         self.create(Percept("trip",{"seller":agt,"attributes":trip}))
     
     def delist_trip(self, agt, trip):
-        self.print(f"Trip delisted by {agt}: {trip['attributes']}")
         trip_perc = self.get(Percept("trip",trip))
+        if trip_perc is None:
+            return
+        self.print(f"Trip delisted by {agt}: {trip['attributes']}")
         self.delete(trip_perc)
 
 class Seller(Agent):    
@@ -28,7 +28,7 @@ class Seller(Agent):
         
     @pl(gain,Goal("buy",Any))
     def trip_bought(self, src, trip):
-        if self.has(Belief("trip",trip)):
+        if self.has(Belief("trip",trip,"Website")):
             self.print(f"Selling trip: {trip['attributes']} to {src}")
             self.delist_trip(trip)
             self.send(src,tell,Belief("travel_ticket",trip))
