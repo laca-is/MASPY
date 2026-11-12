@@ -40,16 +40,16 @@ class Robot(Agent):
             self.rm(Belief("room_is_dirty"))
             self.add(Belief("room_is_clean"))
             self.print("*** Finished Cleaning ***")
-            Admin().stop_system()
+            self.stop_cycle()
         else:
             self.print(f"Moving to {target}")
-            self.add(Goal("move",target))
+            self.add(Goal("move",target),instant=False)
     
     @pl(gain,Goal("clean_dirt"))                            
     def clean(self,src):
         if self.has(Belief("room_is_dirty")):
             self.clean_position(self.position)
-            self.add(Goal("decide_move"))
+            self.add(Goal("decide_move"),instant=False)
     
     @pl(gain,Goal("move",(Any,Any)))
     def move(self,src,target):
@@ -76,10 +76,10 @@ class Robot(Agent):
         
         if self.position == (tgX,tgY):
             self.print(f"Reached dirt position")
-            self.add(Goal("clean_dirt"))
+            self.add(Goal("clean_dirt"),instant=False)
             return
         else:
-            self.add(Goal("move",(tgX,tgY)))
+            self.add(Goal("move",(tgX,tgY)),instant=False)
 
 if __name__ == "__main__":
     env = Room()

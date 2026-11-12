@@ -35,7 +35,7 @@ class SortingBox(Environment):
         objeto = self.get(Percept(obj, Any))
         assert isinstance(objeto, Percept)
         self.print(f"{agt} is moving {obj} from {objeto.values} to {box}")
-        self.change(objeto, box)
+        objeto.change(values=box)
 
 class BoxAgent(Agent):
     @pl(gain,Goal("make_model", Any))

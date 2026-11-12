@@ -91,7 +91,7 @@ class Taxi(Environment):
         percept = self.get(Percept("taxi_location", (Any,Any)))
         assert isinstance(percept, Percept)
         position = self.moviment(percept.values, direction)
-        self.change(percept, position)
+        percept.change(values=position)
         self.print_percepts
 
     @action(listed, "pickup", pickup_transition)
@@ -101,7 +101,7 @@ class Taxi(Environment):
         if pass_loc.values == "T":
             self.print("Passanger already on Taxi")
         elif taxi_loc.values == self.destinations[pass_loc.values]:
-            self.change(pass_loc, "T")
+            pass_loc.change(values="T")
             self.print(f"{agt} is picking up a passenger at {taxi_loc.values} position")
         else:
             self.print(f"No passanger at {taxi_loc.values} position")
@@ -115,7 +115,7 @@ class Taxi(Environment):
         if pass_loc.values == "T":
             if taxi_loc.values == dest_loc.values:
                 self.print(f'{agt} is dropping off passenger at destination {dest_loc.values}')
-                self.change(pass_loc, "D")
+                pass_loc.change(values="D")
             else:
                 self.print(f'{agt} is trying to drop passenger at {taxi_loc.values} position')
         else:
@@ -131,8 +131,8 @@ class Sample(Agent):
 
 if __name__ == "__main__":
     env = Taxi("Grid")
-    model = EnvModel(env)
+    model = EnvModel(env, show_learning=True)
     print(f'actions: {model.actions_list}  space: {model.observation_space}')
-    model.learn(qlearning, num_episodes=5000)
+    model.learn(qlearning, num_episodes=2000)
     Sample("Ag").add(Goal("aquire_learning",[model]))
     Admin().start_system()

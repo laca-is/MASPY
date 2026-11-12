@@ -14,18 +14,24 @@ class Sample(Agent):
                 continue
             self.print(f"Sending> {msg} to {agent}")
             self.send(agent, achieve, Goal("receive_info", msg))
-            
+        
+        self.wait(5, Event(gain, Belief("info_received")))
+        self.print("Receiver got the message")
+        
         agents_list = self.list_agents("Test")
         for agent in agents_list:
             plan = self.get(Plan, Goal("print"))
             self.send(agent, tellHow, plan)
             self.send(agent, achieve, Goal("print"))
-            
+
         self.stop_cycle()
 
     @pl(gain, Goal("receive_info", Any), Belief("receiver"))
     def recv_info(self, src, msg):
         self.print(f"Information [{msg}] - Received from {src}")
+        blf = self.send(src, askOneReply, Belief("value", Any))
+        if blf:
+            self.print(f"Got {blf.values} from {blf.source}")
         self.send(src, tell, Belief("info_received"))
         self.stop_cycle()
 
@@ -33,10 +39,9 @@ class Test(Agent):
     ...
     
 if __name__ == "__main__":
-    Channel().show_exec = True
-    
-    sender = Sample("Sender", goals=Goal("send_info","Hello"))    
-    sender.add(Belief("sender"))
+    Channel(show_exec=True)
+    Test()
+    sender = Sample("Sender", beliefs=[Belief("sender"), Belief("value",42)], goals=Goal("send_info","Hello"))    
     
     receiver = Sample("Receiver", Belief("receiver"))
     Admin().start_system()

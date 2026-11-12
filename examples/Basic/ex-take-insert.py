@@ -17,16 +17,16 @@ class Taker(Agent):
 
     @pl(gain, Goal("take_object"))
     def take_obj(self, src):
-        self.print(f"[{self.cycle_counter}] Takin object")
+        self.print(f"Taking object")
         self.take()
         self.stop_cycle()
 
 class Inserter(Agent):
     @pl(lose, Belief("object"))
     def insert_obj(self,src):
-        self.print(f"[{self.cycle_counter}] Need to ressuply a new object")
+        self.print(f"Need to ressuply a new object")
         self.stop_cycle()
 
 if __name__ == "__main__":
-    Admin().connect_to([Taker(),Inserter()], Shelf())
+    Admin().connect_to([Inserter(),Taker()], Shelf())
     Admin().start_system()

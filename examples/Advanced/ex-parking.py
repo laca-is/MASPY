@@ -3,7 +3,7 @@ import random as rnd
 from time import sleep
 
 class Parking(Environment):
-    def __init__(self, env_name,nr_spots=10):
+    def __init__(self, env_name, nr_spots=10):
         super().__init__(env_name)
         self.create(Percept("sold_spots",0,"Spots",False))
         self.print(f"Starting parking with {nr_spots} spots")
@@ -14,17 +14,17 @@ class Parking(Environment):
         spot = self.get(Percept("spot",(spot_id,"free")))
         self.print(f"Driver {agt} parking on spot({spot_id})")
         if spot:
-            self.change(spot, values=(spot_id,[agt]))
+            spot.change(values=(spot_id,agt))
             return True
         else:
             self.print(f"Requested spot({spot_id}) unavailable")
             return None
     
     def leave_spot(self, agt):
-        spot = self.get(Percept("spot",(Any,[agt])))
+        spot = self.get(Percept("spot",(Any,agt)))
         if spot:
             self.print(f"Driver {agt} leaving spot({spot.values[0]})")
-            self.change(spot, values=(spot.values[0],"free"))
+            spot.change(values=(spot.values[0],"free"))
         else:
             self.print(f"Driver {agt} not found in any spot")
 
@@ -136,7 +136,6 @@ class Driver(Agent):
         self.stop_cycle()
 
 def main(num_agents: int = 10, num_spots: int = 5):
-    Admin(file_log=True)
     park = Parking('Parking',num_spots)
     park_ch = Channel("Parking")
     manager = Manager()
@@ -152,11 +151,9 @@ def main(num_agents: int = 10, num_spots: int = 5):
         drv = Driver("Drv",budget,counter,wait)
         driver_list.append(drv)
         
-    manager.read_all_mail = False
     Admin().connect_to(manager, [park,park_ch])
     Admin().connect_to(driver_list, park_ch)
     Admin().start_system()
-
         
 if __name__ == "__main__":
-    main(50,10)
+    main(100,50)

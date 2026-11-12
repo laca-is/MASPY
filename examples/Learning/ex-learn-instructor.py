@@ -34,7 +34,7 @@ class Map(Environment):
         assert isinstance(percept, Percept)
         self.print(f"{agt} in {percept.values} is Moving {direction}")
         new_location = self.moviment(percept.values, direction)
-        self.change(percept, new_location)
+        percept.change(values=new_location)
         self.print_percepts
         if new_location in self.targets:
             self.print(f"{agt} reached a target")
@@ -61,7 +61,6 @@ class Mover(Agent):
         belief_model = self.send("Instructor", askOneReply, Belief("Model",("Map", Any)))
         if isinstance(belief_model, Belief):
             model: EnvModel = belief_model.values[1][0]
-            model.reset_percepts()
             self.add_policy(model)
             self.auto_action = True
         else:

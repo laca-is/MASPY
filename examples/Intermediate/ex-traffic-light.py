@@ -5,20 +5,36 @@ class Cross_Manager(Agent):
     @pl(gain, Belief("traffic_light", Any, "Crossing"))
     def traffic_light(self, src, color):
         vehicles = self.list_agents("Vehicle","Env","Cross_Junction")
+        self.add(Belief("counter",len(vehicles)))
         for vehicle in vehicles:
             self.print(f"Detected traffic light: {color} in env {src} - sending signal to {vehicle}")
             self.send(vehicle, achieve, Goal("crossing_over"), "Crossing")
     
     @pl(gain, Belief("leaving_junction"))
     def end_watch(self,src):
-        self.stop_cycle()
+        counter_bel = self.get(Belief("counter",Any))
+        counter = counter_bel.values-1
+        if counter <= 0:
+            self.print("All vehicles have left the junction.")
+            self.stop_cycle()
+        else:
+            counter_bel.change(values=counter)
 
 class Vehicle(Agent):
     @pl(gain, Goal("crossing_over"))
     def crossing(self,src):
         self.print(f"Confirmation for crossing by {src}")
         self.cross()
-        self.print("Crossing Completed")
+    
+    @pl(success, Goal("crossing_over"))
+    def crossing_completed(self, src):
+        self.print(f"Action 'cross' succeeded for Goal('crossing_over').")
+        self.send(src, tell, Belief("leaving_junction"), "Crossing")
+        self.stop_cycle()
+
+    @pl(failure, Goal("crossing_over"))
+    def crossing_failed(self, src):
+        self.print(f"Action 'cross' failed for Goal('crossing_over').")
         self.send(src, tell, Belief("leaving_junction"), "Crossing")
         self.stop_cycle()
 
@@ -29,6 +45,10 @@ class Crossing(Environment):
         self.create(Percept("traffic_light", choice(self.colors)))
     
     def cross(self, agt):
+        light = self.get(Percept("traffic_light", Any))
+        if light and light.values == "red":
+            self.print("Traffic light is red! Cannot cross.")
+            raise ActionFailed("red_light")        
         self.print(f"Agent {agt} is now crossing")
 
 if __name__ == "__main__":

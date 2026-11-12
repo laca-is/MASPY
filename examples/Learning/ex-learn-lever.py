@@ -27,26 +27,36 @@ class Levers(Environment):
     
     @action(listed, (0,1,2), lever_transition)
     def lever(self, agt, lever: int):
+        self.show_exec = True
         pulled_lever = self.get(Percept("pulled_lever", Any))
+        self.show_exec = False
         assert isinstance(pulled_lever, Percept)
         if lever == 0:
             self.points -= 1
-            self.change(pulled_lever, 0)
+            pulled_lever.change(values=0)
         elif lever == 1 and pulled_lever.values == 1:
             self.points += 5
         elif lever == 1:
-            self.change(pulled_lever, 1)
+            pulled_lever.change(values=1)
         elif lever == 2:
             self.points += 3
-            self.change(pulled_lever, -1)
+            pulled_lever.change(values=-1)
         
         self.print(f"{agt} is pulling lever: {lever} - total points: {self.points}")
    
 class LeverAgent(Agent):
     @pl(gain, Goal("decide_lever"))
     def decide_lever(self, src):
-        self.best_action("LeverEnv")
-        self.stop_cycle()
+        old_pulled_lever = self.get(Belief("pulled_lever", Any))
+        action, _ = self.get_best_action("LeverEnv")
+        self.print(f"The Best Action is {old_pulled_lever.values} : {action}")
+        self.lever(action)
+        self.perceive("LeverEnv")
+        new_pulled_lever = self.get(Belief("pulled_lever", Any))
+        #self.print("old q_table: \n",self._strategies[0].print_policy())
+        self.update_learning("LeverEnv", action, old_pulled_lever.values, new_pulled_lever.values)
+        #self.print("new q_table: \n",self._strategies[0].print_policy())
+        return False
         
 if __name__ == "__main__":
     env = Levers("LeverEnv")

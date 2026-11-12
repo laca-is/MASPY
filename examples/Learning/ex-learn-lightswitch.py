@@ -31,7 +31,9 @@ class LightSwitch(Environment):
 class Flipper(Agent):
     @pl(gain, Goal("flipSwitch"))
     def flipSwitch(self, src):
-        self.best_action("LightSwitch")
+        action, _ = self.get_best_action("LightSwitch")
+        self.print(f"The Best Action is Flipping switch {action}")
+        self.switch(action)
         self.stop_cycle()
     
 if __name__ == "__main__":

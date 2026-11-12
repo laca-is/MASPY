@@ -7,12 +7,12 @@ class SimpleEnv(Environment):
 class SimpleAgent(Agent):
     @pl(gain,Goal("say_hello", Any))
     def send_hello(self,src,agent):
-        self.send(agent,tell,Belief("Hello"),"SimpleChannel")
+        self.send(agent,tell,Belief("Hello"),"SimpleChannel") # Communication thru a Channel (SimpleChannel)
 
     @pl(gain,Belief("Hello"))
     def recieve_hello(self,src):
         self.print(f"Hello received from {src}")
-        self.env_act(src)
+        self.env_act(src) # Execution of Environment Action
 
 if __name__ == "__main__":
     Admin().console_settings(True)

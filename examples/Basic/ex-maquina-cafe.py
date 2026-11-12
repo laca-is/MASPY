@@ -8,7 +8,6 @@ class MaquinaCafe(Environment):
     def preparar_cafe(self, src):
         self.print(f"Preparar cafe para o agente: {src}")
 
-
 class AgenteCafe(Agent):
     def __init__(self, agent_name):
         super().__init__(agent_name)
@@ -19,9 +18,9 @@ class AgenteCafe(Agent):
         self.print("Verificar ambiente")
         percepcao1 = self.get(Belief("tem_agua",source="Expresso"))
         percepcao2 = self.get(Belief("tem_graos",source="Expresso"))
-        self.print(percepcao1.name)       # imprime o valor das percepcoes obtidas do ambiente
+        self.print(percepcao1.name)  # imprime o valor das percepcoes obtidas do ambiente
         self.print(percepcao2.name)
-        if percepcao1 and percepcao2:                   # testa se ha conteudo nas "percepcoes"
+        if percepcao1 and percepcao2:  # testa se ha conteudo nas "percepcoes"
             self.preparar_cafe()   # chama acao do ambiente
         self.stop_cycle()
 
