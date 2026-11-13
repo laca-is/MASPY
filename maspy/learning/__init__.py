@@ -11,8 +11,12 @@
 # )
 
 from maspy.learning.modelling import (
-    EnvModel,qlearning, sarsa, sequence, combination, permutation, cartesian, listed
+    EnvModel,qlearning, sarsa, actor_critic,
+    sequence, combination, permutation, cartesian, listed, 
+    continuous
 )
+
+from maspy.learning.space import Box
 
 # register(
 #     id="taxi_ml",
@@ -46,9 +50,12 @@ __all__ = [
     "EnvModel",
     "qlearning",
     "sarsa",
+    "actor_critic",
     "sequence",
     "combination",
     "permutation",
     "cartesian",
-    "listed"
+    "listed",
+    "continuous",
+    "Box"
 ]

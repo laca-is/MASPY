@@ -1,8 +1,8 @@
 import threading
 import ctypes
-from logging import getLogger
+from logging import getLogger, INFO, DEBUG
 from dataclasses import dataclass, field
-from maspy.environment import Environment, Percept	
+from maspy.environment import Environment, Percept, ActionFailed, values_are_wild	
 from maspy.communication import Channel, Act, broadcast
 from maspy.learning import EnvModel
 from maspy.error import (
@@ -11,8 +11,8 @@ from maspy.error import (
     RunPlanError,
 )
 from maspy.utils import set_changes, merge_dicts, manual_deepcopy, freeze_obj, unfreeze_obj, bcolors, Condition
-from typing import List, Optional, Dict, Set, Any, Union, Type, cast, _SpecialForm, TypeGuard, TypeVar, TYPE_CHECKING
-from collections.abc import Iterable, Callable, Sequence, Mapping
+from typing import List, Optional, Dict, Set, Any, Union, Type, cast, TypeGuard, TypeVar, TYPE_CHECKING
+from collections.abc import Iterable, Callable, Sequence
 from collections import deque
 from time import sleep
 from enum import Enum
@@ -24,8 +24,8 @@ from operator import and_
 import inspect
 import sys
 
-from concurrent.futures import ThreadPoolExecutor
-import cProfile, pstats, io
+from concurrent.futures import ThreadPoolExecutor, Future
+import asyncio, contextvars
 
 Event_Change = Enum('gain | lose | test | success | failure', ['gain', 'lose', 'test', 'success', 'failure']) # type: ignore[misc]
 
@@ -54,6 +54,10 @@ DEFAULT_SOURCE = "self"
 DEFAULT_CHANNEL = "default"
 PENDING_TIMER = 20
 PRINT_CHECKS = False
+IDLE_WAIT = 1.0     # seconds an idle agent sleeps before checking for work anyway (it is woken earlier by messages, events, environment changes and stop)
+REPLY_TIMEOUT = 2.0 # seconds a sender waits for the answer to an ask / askOneReply / askAllReply before giving up
+MAIL_BACKLOG = 8    # when more than this many messages are waiting, the cycle reads MAIL_BATCH of them per turn instead of one
+MAIL_BATCH = 256    # most messages read in one turn of the reasoning cycle once the mailbox is backing up
 
 @dataclass(eq=True, frozen=True)
 class Belief(Condition):
@@ -86,8 +90,8 @@ class Belief(Condition):
         }
 
     def __post_init__(self):
-        if not isinstance(self.name, str): raise TypeError(f"Belief.name[ {self.name} ] is not a string")
-        if not isinstance(self.source, str): raise TypeError(f"Belief.source[ {self.source} ] is not a string")
+        if not isinstance(self.name, str): raise TypeError(f"Belief.name[ {self.name} ] is not a string | Belief {self.name}({self._values})[{self.source}]")
+        if not isinstance(self.source, str): raise TypeError(f"Belief.source[ {self.source} ] is not a string | Belief {self.name}({self._values})[{self.source}]")
         object.__setattr__(self, "v_len", len(self._values) if isinstance(self._values, tuple) else 1)
         match self._values:
             case list() | dict() | str():
@@ -109,25 +113,42 @@ class Belief(Condition):
     def change(self, key: str|None = None, values: Any|None = None, source: str|None = None, adds_event: bool|None = None) -> None:
         frame = inspect.currentframe()
         caller_frame = frame.f_back if frame else None
+        assert caller_frame
         caller_locals = caller_frame.f_locals if caller_frame else None
         caller_instance = caller_locals.get('self', None) if caller_locals else None
+        caller_method = caller_frame.f_code.co_name
         if isinstance(caller_instance, Agent):
-            caller_instance.rm(self)
+            old_belief = self.info
+            old_str = f'{self}'
+            caller_instance.rm(self, log=False)
             new_belief = Belief(
                 key if key is not None else self.name,
                 values if values is not None else self._values,
                 source if source is not None else self.source,
                 adds_event if adds_event is not None else self.adds_event
             )
-            caller_instance.add(new_belief)
+            caller_instance.add(new_belief, log=False)
+            
+            #extras = caller_instance.agent_info
+            #extras.update({"Old Belief": old_belief, "New Belief": new_belief.info, "function_name":caller_method})
+            if caller_instance.show_exec:
+                caller_instance.print(f'Changing Belief {old_str} to {new_belief}')
+            #caller_instance.logger.info('Changing Belief', extra=extras)
+            if caller_instance.logger.isEnabledFor(INFO):
+                extras = caller_instance.agent_info
+                extras.update({"Old Belief": old_belief, "New Belief": new_belief.info, "function_name":caller_method})
+                caller_instance.logger.info('Changing Belief', extra=extras)
         else:
             print(f"{type(caller_instance)}, not an Agent instance, trying to change {self}")
 
     def __hash__(self) -> int:
+        try:
+            return hash((self.name, self._values, self.source))     # fast path: every value is hashable
+        except TypeError:
+            pass
         values_hashable = []
         for value in self._values:
-            value_dict = type(value).__dict__
-            if value_dict.get("__hash__"):
+            if getattr(type(value), "__hash__", None) is not None:
                 values_hashable.append(value)
             elif isinstance(value, (List, Dict, Set)):
                 values_hashable.append(repr(value))
@@ -197,24 +218,41 @@ class Goal(Condition):
     def change(self, key: str|None = None, values: Any|None = None, source: str|None = None, adds_event: bool|None = None) -> None:
         frame = inspect.currentframe()
         caller_frame = frame.f_back if frame else None
+        assert caller_frame
         caller_locals = caller_frame.f_locals if caller_frame else None
         caller_instance = caller_locals.get('self', None) if caller_locals else None
+        caller_method = caller_frame.f_code.co_name
         if isinstance(caller_instance, Agent):
-            caller_instance.rm(self)
-            new_belief = Belief(
+            old_goal = self.info
+            old_str = f'{self}'
+            caller_instance.rm(self, log=False)
+            new_goal = Goal(
                 key if key is not None else self.name,
                 values if values is not None else self._values,
                 source if source is not None else self.source
             )
-            caller_instance.add(new_belief)
+            caller_instance.add(new_goal, log=False)
+            
+            #extras = caller_instance.agent_info
+            #extras.update({"Old Goal": old_goal, "New Goal": new_goal.info, "function_name":caller_method})
+            if caller_instance.show_exec:
+                caller_instance.print(f'Changing Goal {old_str} to {new_goal}')
+            #caller_instance.logger.info('Changing Goal', extra=extras)
+            if caller_instance.logger.isEnabledFor(INFO):
+                extras = caller_instance.agent_info
+                extras.update({"Old Goal": old_goal, "New Goal": new_goal.info, "function_name":caller_method})
+                caller_instance.logger.info('Changing Goal', extra=extras)
         else:
             print(f"{type(caller_instance)}, not an Agent instance, trying to change {self}")
     
     def __hash__(self) -> int:
+        try:
+            return hash((self.name, self._values, self.source))     # fast path: every value is hashable
+        except TypeError:
+            pass
         values_hashable = []
         for value in self._values:
-            value_dict = type(value).__dict__
-            if value_dict.get("__hash__"):
+            if getattr(type(value), "__hash__", None) is not None:
                 values_hashable.append(value)
             elif isinstance(value, (List, Dict, Set)):
                 values_hashable.append(repr(value))
@@ -290,7 +328,7 @@ class Ask:
     """ Asks represent a request for information from the Agent """
     data_type: Belief | Goal
     source: str = "unknown"
-    reply_event: threading.Event = threading.Event()
+    reply_event: threading.Event = field(default_factory=threading.Event, repr=False, compare=False)   # one per Ask: a shared Event made any reply wake every waiting asker
     reply_content: Belief | Goal | Plan | List[Belief | Goal | Plan] | None = None 
     
     @property
@@ -314,6 +352,12 @@ class Intention:
     plan: Plan = field(default_factory=Plan)
     event: Event = field(default_factory=Event)
     args: tuple | Any = field(default_factory=tuple)
+    future: Any = field(default=None, repr=False, compare=False)   # handle used to cancel the running plan
+    resume: Any = field(default=None, repr=False, compare=False)   # asyncio.Event used by wait_async
+    cancel_requested: bool = field(default=False, repr=False, compare=False)
+    drop_requested: bool = field(default=False, repr=False, compare=False)   # set by _cancel_intention, checked when the task starts
+    task: Any = field(default=None, repr=False, compare=False)               # the asyncio.Task, set from inside the loop
+    sync_resume: Any = field(default_factory=threading.Event, repr=False, compare=False)  # per-intention event for sync wait()
     
     @property
     def info(self) -> dict:
@@ -371,6 +415,70 @@ def pl(change: Event_Change, data: Belief | Goal, context: Belief | Goal | List[
         
     return decorator
 
+class _ElasticPool:
+    """ 
+    One pool of daemon worker threads shared by every Agent for running Plans
+    
+    It grows on demand (a task never waits for a busy worker, so a Plan blocked in `wait()` can not starve the others) 
+    and its workers retire after `idle_ttl` seconds without work. 
+    Agents therefore stop holding up to `max_intentions` private threads each.
+    """
+    def __init__(self, idle_ttl: float = 2.0):
+        self._cv = threading.Condition(threading.Lock())
+        self._tasks: deque = deque()
+        self._idle = 0
+        self._ttl = idle_ttl
+    
+    def submit(self, fn: Callable, *args: Any, **kwargs: Any) -> Future:
+        future: Future = Future()
+        with self._cv:
+            self._tasks.append((future, fn, args, kwargs))
+            if self._idle >= len(self._tasks):      # enough waiting workers for everything queued
+                self._cv.notify()
+                return future
+        threading.Thread(target=self._worker, daemon=True, name="maspy_plan_worker").start()
+        return future
+    
+    def _worker(self) -> None:
+        cv = self._cv
+        cv.acquire()
+        try:
+            while True:
+                while not self._tasks:
+                    self._idle += 1
+                    notified = cv.wait(self._ttl)
+                    self._idle -= 1
+                    if not notified and not self._tasks:
+                        return                      # idle for too long: retire
+                future, fn, args, kwargs = self._tasks.popleft()
+                cv.release()
+                try:
+                    if future.set_running_or_notify_cancel():
+                        try:
+                            future.set_result(fn(*args, **kwargs))
+                        except BaseException as exc:
+                            future.set_exception(exc)
+                finally:
+                    cv.acquire()
+        finally:
+            cv.release()
+
+_PLAN_POOL = _ElasticPool()
+
+class _PlanPool:
+    """ What an Agent sees of the shared pool (an Agent stopping must not shut the shared pool down) """
+    def submit(self, fn: Callable, *args: Any, **kwargs: Any) -> Future:
+        return _PLAN_POOL.submit(fn, *args, **kwargs)
+    def shutdown(self, wait: bool = True, **kwargs: Any) -> None:
+        pass
+
+class PlanCancelled(BaseException):
+    """ 
+    Raised inside a plain (non-async) plan at its next framework call after the Intention was dropped.
+    Derives from BaseException so a plan's own `except Exception` can't swallow it. 
+    """
+_current_intention: contextvars.ContextVar[Optional[Intention]] = contextvars.ContextVar("maspy_intention", default=None)    
+
 class Agent: 
     """Extends all capabilities of a BDI Agent"""
     def __init__(
@@ -387,15 +495,9 @@ class Agent:
         read_all_mail = False,
         max_intentions = 5
     ):              
-        self.show_exec: bool = show_exec
-        self.show_cycle: bool = show_cycle
-        self.show_prct: bool = show_prct
-        self.show_slct: bool = show_slct
-        self.logging = logging
         self.cycle_log: Dict[float, list[Dict[str, Any]]] = dict()
         self.cycle_counter = 0
         self.last_log: Any = ""
-        self.printing = True
         
         from maspy.admin import Admin
         self.unique: bool = False
@@ -405,6 +507,13 @@ class Agent:
         self.tuple_name: tuple[str, int] = (name, 0)
         self.my_name = name
         Admin().add_agents(self)
+        self.show_exec: bool = show_exec
+        self.show_cycle: bool = show_cycle
+        self.show_prct: bool = show_prct
+        self.show_slct: bool = show_slct
+        self.logging = logging
+        self.printing = True
+        
         self.print_queue = Admin().print_queue
         self.sys_time = Admin().sys_time
         self.logger = getLogger("maspy")
@@ -412,10 +521,14 @@ class Agent:
         self.stop_flag: threading.Event | None = None
         self.running: bool = False
         self.thread: threading.Thread | None = None
-        self._plan_executor: ThreadPoolExecutor = ThreadPoolExecutor(
-            max_workers=max_intentions, 
-            thread_name_prefix=f"{self.my_name}_plans"
-        )
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._loop_thread: threading.Thread | None = None
+        self._loop_lock: threading.Lock = threading.Lock()
+        # self._plan_executor: ThreadPoolExecutor = ThreadPoolExecutor(
+        #     max_workers=max_intentions, 
+        #     thread_name_prefix=f"{self.my_name}_plans"
+        # )
+        self._plan_executor = _PlanPool()      # plans run on the shared, elastic pool
         self._msg_executor: ThreadPoolExecutor = ThreadPoolExecutor(
             max_workers=5,
             thread_name_prefix=f"{self.my_name}_msgs"
@@ -424,12 +537,13 @@ class Agent:
         self.lock = threading.Lock()
         self.env_lock = threading.Lock()
         self.ch_lock = threading.Lock()
-        self.update_lock = threading.Lock()
+        self.update_lock = threading.RLock()
         self.intention_lock = threading.Lock()
         self.print_lock = threading.Lock()
         self.msg_lock = threading.Lock()
         self.reply_event: Dict[tuple, threading.Event] = {}
         self._work_condition: threading.Event = threading.Event()
+        self._work_condition.set()
         self._has_pending_mail = False
         self._has_pending_perception = False
         
@@ -454,14 +568,23 @@ class Agent:
         
         self.__events: List[Event] = []
         self._pending_events: List[tuple[Event, int, str]] = []
+        self._last_pending_checked: int = 0
         self.curr_event: Event | None = None
         self.last_event: Event | None = None
+        
         self.__beliefs: Dict[str, Dict[str, Set[Belief]]] = dict()
+        self._belief_index: Dict[Belief, None] = {}      # insertion ordered set: O(1) add / remove / membership
+        self._wild_belief_keys: Set[tuple[str, str]] = set()   # (source, name) of stored Beliefs holding `Any` or unhashable values
+        
         self.__goals: Dict[str, Dict[str, Set[Goal]]] = dict()
-        self.__perceptions: Dict[str, Dict[str, Set[Percept]]] = dict()
-        self.belief_list: List[Belief] = []
-        self.goal_list: List[Goal] = []
+        self._goal_index: Dict[Goal, None] = {}
+        self._wild_goal_keys: Set[tuple[str, str]] = set()     # same, for Goals
         self.last_goal: Goal | None = None
+        
+        self.__perceptions: Dict[str, Dict[str, Set[Percept]]] = dict()
+        self._perception_beliefs: Dict[str, Dict[str, Set[Belief]]] = dict()   # the perceptions as Beliefs, kept up to date by _revision
+        self._wild_percept_keys: Set[tuple[str, str]] = set()
+        self._env_versions: Dict[str, int] = dict()            # last version of each Environment that was perceived    
         self.percept_filter: Dict[str, set[str]] = {ignore.name: set(), focus.name: set()}
         
         self.saved_msgs: deque = deque()
@@ -477,12 +600,14 @@ class Agent:
             if self.logging: self.logger.debug(f"Adding Initial Goals: {goals}", extra=self.agent_info)
             self.add(goals, False)
         
-        self._plans: List[Plan]
-        try:    
-            if not self._plans:
-                self._plans = []
-        except AttributeError:
-            self._plans = []
+        # self._plans: List[Plan]
+        # try:    
+        #     if not self._plans:
+        #         self._plans = []
+        # except AttributeError:
+        #     self._plans = []
+        self._plans: List[Plan] = list(getattr(self, "_plans", []))
+        
         self._plan_index: Dict[tuple, List[Plan]] = {}
         self._build_plan_index()
 
@@ -499,7 +624,8 @@ class Agent:
         name = self.my_name if not self.unique else self.tuple_name[0]
         msg = f"{self.tcolor}Agent:{name}> {f_args}{f_kwargs}{bcolors.ENDCOLOR}"
         self.print_queue.put(msg)
-        self.logger.info(msg, extra=self.agent_info)
+        if self.logger.isEnabledFor(INFO):
+            self.logger.info(msg, extra=self.agent_info)
         
     @property
     def print_beliefs(self):
@@ -549,7 +675,33 @@ class Agent:
         for plan, _ in self.__running_intentions:
             buffer += f"\n\t{plan}"
         self.print(buffer)
+
+    @property
+    def belief_list(self) -> List[Belief]:
+        """ All Beliefs added to the Agent, in insertion order (a new list on every access) """
+        return list(self._belief_index)
     
+    @property
+    def goal_list(self) -> List[Goal]:
+        """ All Goals added to the Agent, in insertion order (a new list on every access) """
+        return list(self._goal_index)
+
+    @staticmethod
+    def _snapshot(collection) -> list:
+        """ 
+        Copies a collection that other threads may be changing (deque, dict, set or list) into a list.
+        
+        Looping over such a collection directly raises RuntimeError ("deque mutated during iteration") 
+        when another thread changes it between two steps of the loop. The copy is done in one C-level 
+        call and is retried in the unlikely case it still collides with a writer.
+        """
+        for _ in range(10):
+            try:
+                return list(collection)
+            except RuntimeError:
+                continue
+        return []
+
     @property
     def agent_info(self):
         """Returns the latest internal information from the Agent"""
@@ -558,28 +710,64 @@ class Agent:
             "my_name": self.my_name if not self.unique else self.tuple_name[0],
             "cycle": self.cycle_counter,
             "curr_event": self.curr_event.info if self.curr_event else None,
+            "pending_events": [event[0].info for event in self._snapshot(self._pending_events)],
             "aplc_plans": [self.rlv_plans.info for self.rlv_plans in (self.relevant_plans or [])],
-            "running_intentions": [rng_intention.info for rng_intention in self.__running_intentions],
+            "running_intentions": [rng_intention.info for rng_intention in self._snapshot(self.__running_intentions)],
             "num_intentions": self.__running_intentions.__len__(),
             "last_intention": self.last_intention.info if self.last_intention else None,
             "last_event": self.last_event.info if self.last_event else None,   
-            "intentions": [intention.info for intention in self.__intentions],
-            "events": [event.info for event in self.__events],
-            "saved_msgs": list(self.saved_msgs),
-            "beliefs": [belief.info for belief in self.belief_list], 
-            "perceptions": [p.info for p_dict in self.__perceptions.values() for p_set in p_dict.values() for p in p_set],
-            "goals": [goal.info for goal in self.goal_list],
+            "intentions": [intention.info for intention in self._snapshot(self.__intentions)],
+            "events": [event.info for event in self._snapshot(self.__events)],
+            "saved_msgs": self._snapshot(self.saved_msgs),
+            "beliefs": [belief.info for belief in list(self._belief_index)], 
+            "perceptions": [p.info for p_dict in self._snapshot(self.__perceptions.values()) for p_set in self._snapshot(p_dict.values()) for p in self._snapshot(p_set)],
+            "goals": [goal.info for goal in list(self._goal_index)],
             "envs": list(self._environments.keys()), 
             "chs": list(self._channels.keys())
         }
+        
+    def _plan_key(self, plan: Plan) -> tuple | None:
+        """ Key of the plan index: (change, type of data, name). None if the plan has no trigger data """
+        data = plan.trigger.data
+        if data is None:
+            return None
+        return (plan.trigger.change, type(data), data.name)
     
-    def _build_plan_index(self):
-        self._plan_index.clear()
+    def _index_add_plan(self, plan: Plan) -> None:
+        """ 
+        Adds a single Plan to the plan index, touching only its bucket.
+        
+        Buckets are replaced instead of mutated, so a cycle thread running _retrieve_plans 
+        never iterates a list that is being modified.
+        """
+        key = self._plan_key(plan)
+        if key is None:
+            return
+        self._plan_index[key] = self._plan_index.get(key, []) + [plan]
+    
+    def _index_rm_plan(self, plan: Plan) -> None:
+        """ Removes a single Plan from the plan index, touching only its bucket (empty buckets are dropped) """
+        key = self._plan_key(plan)
+        bucket = self._plan_index.get(key) if key is not None else None
+        if not bucket or plan not in bucket:
+            return
+        new_bucket = list(bucket)
+        new_bucket.remove(plan)
+        assert key is not None
+        if new_bucket:
+            self._plan_index[key] = new_bucket
+        else:
+            del self._plan_index[key]
+    
+    def _build_plan_index(self) -> None:
+        """ Full rebuild from self._plans (used at init). The new index is swapped in, so it is never seen half-built """
+        index: Dict[tuple, List[Plan]] = {}
         for plan in self._plans:
-            key = (plan.trigger.change, type(plan.trigger.data), plan.trigger.data.name)
-            if key not in self._plan_index:
-                self._plan_index[key] = []
-            self._plan_index[key].append(plan)
+            key = self._plan_key(plan)
+            if key is None:
+                continue
+            index.setdefault(key, []).append(plan)
+        self._plan_index = index
     
     def filter_perceptions(self, operation: Operation, option: Option, group: List[str] | str):
         """
@@ -609,6 +797,7 @@ class Agent:
                 self.percept_filter[option_str].remove(g)
             else:
                 if self.logging: self.logger.warning(f"{g} not in {option_str} filter.", extra=self.agent_info)
+        self._env_versions.clear()   # the filters changed what is perceived: perceive every Environment again
     
     def connect_to(self, target: Environment | Channel | str) -> Environment | Channel | None:
         """
@@ -681,6 +870,7 @@ class Agent:
                     target._rm_agent(self)
                     del self._environments[target.my_name]
                     del self._env_changed[target.my_name]
+                    self._env_versions.pop(target.my_name, None)
             case Channel():
                 with self.ch_lock:
                     target._rm_agent(self)
@@ -716,17 +906,24 @@ class Agent:
         new_event: Event
         if not isinstance(data, Iterable):
             data = [data]
-            
+        dty = data
+        created = False
         for dt in data:
             if isinstance(dt, Belief | Percept) and not dt.adds_event: 
                 continue
+            if isinstance(dt, Percept):
+                dt = Belief(dt.name, dt.values, dt.source, dt.adds_event)
             new_event = Event(change, dt)
+            created = True
+            if self.logger.isEnabledFor(INFO):
+                self.logger.info(f"New Event: {new_event}", extra=self.agent_info)
             if instant:
                 self._instant_plan(new_event)
             else:
                 self.__events.append(new_event)
                 self._check_event_supended(new_event)
-        self._notify_work()
+        if created:
+            self._notify_work((change.name, dty))
                         
     def _check_event_supended(self,event: Event):
         """ 
@@ -738,12 +935,19 @@ class Agent:
             The Event to check
         """
         for intention in self.__supended_intentions:
-            if intention[0].event.change == event.change and self._compare_data(intention[0].event.data, event.data, True, True, False):
-                intention[0].plan.ev_ctrl.set()
+            self.print(f"Checking {intention[2]} and {event}")
+            if not isinstance(intention[2], Event):
+                self.print("Suspended Intention not waiting for Event")
+                return
+            if intention[2].change == event.change and self._compare_data(intention[2].data, event.data, True, True, False):
+                #intention[0].plan.ev_ctrl.set()
+                intention[0].sync_resume.set()
+                if intention[0].resume is not None and self._loop is not None:
+                    self._loop.call_soon_threadsafe(intention[0].resume.set)
     
     def _get_type_base(self, 
             data_type: Belief | Goal | Plan | Event | Type[Belief | Goal | Plan | Event]
-        ) -> tuple[Dict[str, Dict[str, Set[Belief]]], Dict[str, Dict[str, Set[Percept]]]] | Dict[str, Dict[str, Set[Goal]]] | List[Plan] | List[Event] | None:
+        ) -> tuple[Dict[str, Dict[str, Set[Belief]]], Dict[str, Dict[str, Set[Belief]]]] | Dict[str, Dict[str, Set[Goal]]] | List[Plan] | List[Event] | None:
         """ 
         Returns the database for a given type of data (Belief | Goal | Plan | Event)
         
@@ -758,7 +962,7 @@ class Agent:
             The database
         """
         if isinstance(data_type,Belief) or data_type == Belief:
-            return (self.__beliefs, self.__perceptions)
+            return (self.__beliefs, self._perception_beliefs)
         elif isinstance(data_type,Goal) or data_type == Goal:
             return self.__goals
         elif isinstance(data_type,Plan) or data_type == Plan:
@@ -782,14 +986,18 @@ class Agent:
         """
         if change == "add":
             if isinstance(data_type,Belief):
-                self.belief_list.append(data_type)
+                self._belief_index[data_type] = None
+                if values_are_wild(data_type._values):
+                    self._wild_belief_keys.add((data_type.source, data_type.name))
             else:
-                self.goal_list.append(data_type)
-        if change == "rm":
+                self._goal_index[data_type] = None
+                if values_are_wild(data_type._values):
+                    self._wild_goal_keys.add((data_type.source, data_type.name))
+        elif change == "rm":
             if isinstance(data_type,Belief):
-                self.belief_list.remove(data_type)
+                self._belief_index.pop(data_type, None)
             else:
-                self.goal_list.remove(data_type)
+                self._goal_index.pop(data_type, None)
     
     def _check_caller(self) -> str:
         """ 
@@ -810,7 +1018,7 @@ class Agent:
         """
         return all(isinstance(i, typ) for i in it)  
           
-    def add(self, data_type: Belief | Goal | Plan | Iterable[Belief | Goal | Plan], instant: bool = False, no_lock: bool = False):
+    def add(self, data_type: Belief | Goal | Plan | Iterable[Belief | Goal | Plan], instant: bool = True, no_lock: bool = False, log: bool = True):
         """
         Adds one or more Beliefs, Goals or Plans to the Agent.
 
@@ -821,15 +1029,19 @@ class Agent:
         instant : bool, default=False
             If True, an applicable plan with the triggered event is executed immediately
         """
+        self._checkpoint() # Checks if intention was dropped and closes it
         if self.running is False:
             instant = False
-        if self.logging: self.logger.debug(f"Adding Info: {self._format_data("Adding Info", data_type=data_type,instant=instant)}", extra=self.agent_info)
+        if self.logging and log: self.logger.debug(f"Adding Info: {self._format_data('Adding Info', data_type=data_type,instant=instant)}", extra=self.agent_info)
         
         if isinstance(data_type, Plan):
             self._plans.append(data_type)
+            self._index_add_plan(data_type)  # keep the index used by _retrieve_plans in sync
             return
         elif isinstance(data_type, Iterable) and self._is_type_iter(data_type, Plan):
             self._plans.extend(data_type)
+            for plan in data_type:
+                self._index_add_plan(plan)
             return
         
         data_type = cast(Belief | Goal |Iterable[Belief | Goal], data_type)
@@ -852,7 +1064,7 @@ class Agent:
                         
         self._new_event(gain,data_type,instant)
     
-    def rm(self, data_type: Belief | Goal | Plan | Iterable[Belief | Goal | Plan], instant: bool = False, no_lock: bool=False):
+    def rm(self, data_type: Belief | Goal | Plan | Iterable[Belief | Goal | Plan], instant: bool = True, no_lock: bool=False, log: bool = True):
         """
         Removes one or more Beliefs, Goals or PLans to the Agent.
 
@@ -863,9 +1075,10 @@ class Agent:
         instant : bool, default=False
             If True, an applicable plan with the triggered event is executed immediately
         """
+        self._checkpoint() # Checks if intention was dropped and closes it
         if self.running is False:
             instant = False
-        if self.logging: self.logger.debug(f"Removing Info: {self._format_data("Removing Info", data_type=data_type,instant=instant)}", extra=self.agent_info)
+        if self.logging and log: self.logger.debug(f"Removing Info: {self._format_data('Removing Info', data_type=data_type,instant=instant)}", extra=self.agent_info)
         
         if not isinstance(data_type, Iterable): 
             data_type = [data_type]
@@ -892,6 +1105,7 @@ class Agent:
                     d.remove(typ)
                 elif isinstance(typ, Plan):
                     self._plans.remove(typ)
+                    self._index_rm_plan(typ)
                 else:
                     if self.logging: self.logger.warning(f"Data_Type {typ} is neither Belief, Goal or Plan", extra=self.agent_info)
                     self.print(f"Data_Type {typ} is neither Belief, Goal or Plan")
@@ -902,7 +1116,7 @@ class Agent:
         if self._is_type_iter(data_type, Belief) or self._is_type_iter(data_type, Goal):
             self._new_event(lose,data_type,instant)
 
-    def test(self, data_type: Belief | Goal, instant: bool = False):
+    def test(self, data_type: Belief | Goal, instant: bool = True):
         """
         Tests if the Agent has a Belief or Goal
 
@@ -915,7 +1129,7 @@ class Agent:
         """
         if self.running is False:
             instant = False
-        if self.logging: self.logger.debug(f"Testing Info: {self._format_data("Testing Info", data_type=data_type,instant=instant)}", extra=self.agent_info)
+        if self.logging: self.logger.debug(f"Testing Info: {self._format_data('Testing Info', data_type=data_type,instant=instant)}", extra=self.agent_info)
         self._new_event(test,data_type,instant)
     
     def has(self, data_type: Belief | Goal | Plan | Event) -> bool:
@@ -929,6 +1143,7 @@ class Agent:
         Returns:
             bool: True if it has, False if not
         """
+        self._checkpoint() # Checks if intention was dropped and closes it
         if isinstance(data_type, Belief):
             if data_type.source != "self":
                 return self.get(data_type) is not None
@@ -972,6 +1187,7 @@ class Agent:
                 The retrieved data of the specified type.
             None: If no matches are found, it returns None.
         """  
+        self._checkpoint() # Checks if intention was dropped and closes it # 
         if isinstance(data_type, type): 
             data_type = data_type()
         type_base = self._get_type_base(data_type)
@@ -1058,6 +1274,19 @@ class Agent:
                 The retrieved data of the specified type.
             None: If no matches are found, it returns None.
         """
+        exact_found: list[Belief | Goal] | Belief | Goal = []
+        if not all and ck_type:
+            if type_base is self.__beliefs and type(data) is Belief:
+                exact_found = self._search_exact(type_base, self._wild_belief_keys, data, ck_values, ck_src)
+            if type_base is self._perception_beliefs and type(data) is Belief:
+                exact_found = self._search_exact(type_base, self._wild_percept_keys, data, ck_values, ck_src)
+            if type_base is self.__goals and type(data) is Goal:
+                exact_found = self._search_exact(type_base, self._wild_goal_keys, data, ck_values, ck_src)    
+        if exact_found:
+            if self.logger.isEnabledFor(INFO):
+                self.logger.info(f"Exact Search Found {exact_found} {type(data).__qualname__} like {data}", extra=self.agent_info)
+            return exact_found
+        
         found: list[Belief | Goal | Percept] = []
         if ck_src and data.source != DEFAULT_SOURCE:
             try:
@@ -1085,8 +1314,56 @@ class Agent:
                         if not all:
                             return data_type
                         found.append(data_type)
+        if self.logger.isEnabledFor(INFO):
+            self.logger.info(f"Search Found {found} {type(data).__qualname__} like {data}", extra=self.agent_info)
         return found
-         
+    
+    def _search_exact(self, store: Dict[str, Dict[str, Set[Any]]], wild_keys: Set[tuple[str, str]], data: Belief | Goal, ck_values: bool, ck_src: bool) -> Belief | Goal | list:
+        """ 
+        Finds the first stored Belief / Goal matching `data` (same result as the generic scan in `_search`)
+        
+        Uses set membership instead of comparing against every item with the same name:
+            - exact match (no `Any` wildcard, hashable values): O(1) per source
+            - name only (ck_values=False): O(1) per source
+            - the full comparison is only used for a source that stores a wildcard / unhashable-valued item, or if the query is one
+        """
+        name = data.name
+        sources = [data.source] if (ck_src and data.source != DEFAULT_SOURCE) else list(store)
+        query_wild = ck_values and values_are_wild(data._values)
+        is_belief = isinstance(data, Belief)
+        for src in sources:
+            try:
+                stored = store[src][name]
+            except KeyError:
+                continue
+            if not ck_values:
+                for item in stored:
+                    return item
+                continue
+            if not query_wild:
+                if src == data.source:
+                    candidate = data
+                else:
+                    candidate = object.__new__(type(data))
+                    candidate.__dict__.update(data.__dict__)
+                    object.__setattr__(candidate, "source", src)
+                if candidate in stored:
+                    return candidate
+                if is_belief:      # same data but a different `adds_event` flag is still a match for _compare_data
+                    other = object.__new__(Belief)
+                    other.__dict__.update(candidate.__dict__)
+                    assert isinstance(candidate, Belief)
+                    object.__setattr__(other, "adds_event", not candidate.adds_event)
+                    if other in stored:
+                        return other
+                if (src, name) not in wild_keys:
+                    continue
+            for item in stored:
+                if self._compare_data(item, data, True, ck_values, ck_src):
+                    return item
+        return []
+
+
     def wait(self, timeout: Optional[float] = None, event: Optional[Event] = None):
         """
         Suspends the current intention for a given time or until a certain event is received.
@@ -1108,28 +1385,11 @@ class Agent:
             else:
                 reason += "_event"
             
-        if timeout is not None or event is not None: 
-            tracing = True
-            level = 1
-            while tracing:
-                frame = sys._getframe(level)
-                if frame.f_code.co_name != "_run_plan":
-                    prev_frame = frame
-                    level += 1
-                else:
-                    plan_function_name = prev_frame.f_code.co_name
-                    tracing = False
-            
-            intention: Intention
-            
-            for run_int in self.__running_intentions:
-                if run_int.plan.body.__name__ == plan_function_name:
-                    intention = run_int
-                    break
-            else:
-                self.print(f"Plan {plan_function_name} not found")
-                return
-        else:
+        if timeout is None and event is None:
+            return
+        intention = _current_intention.get()
+        if intention is None:
+            self.print("wait() called outside of an intention")
             return
         
         intention_reason = (intention, reason, event)
@@ -1137,7 +1397,9 @@ class Agent:
         self.__running_intentions.remove(intention)
         self.__supended_intentions.append(intention_reason)
         
-        intention.plan.ev_ctrl.wait(timeout)
+        #intention.plan.ev_ctrl.wait(timeout)
+        intention.sync_resume.wait(timeout)
+        intention.sync_resume.clear()
         
         self.__supended_intentions.remove(intention_reason)
         
@@ -1145,7 +1407,26 @@ class Agent:
             sleep(0.01)
 
         self.__running_intentions.append(intention)
-    
+        self._checkpoint() # Checks if intention was dropped and closes it # Checks if intention was dropped and closes it
+
+    async def wait_async(self, timeout: Optional[float] = None, event: Optional[Event] = None):
+        """ Async version of wait(): suspends only this plan's task, without holding a thread """
+        intention = _current_intention.get()
+        if intention is None or (timeout is None and event is None):
+            return
+        entry = (intention, "timeout" if event is None else "event", event)
+        intention.resume = asyncio.Event()
+        self.__running_intentions.remove(intention)
+        self.__supended_intentions.append(entry)
+        try:
+            await asyncio.wait_for(intention.resume.wait(), timeout)
+        except asyncio.TimeoutError:
+            pass
+        finally:                      # also runs when the plan is cancelled while waiting
+            self.__supended_intentions.remove(entry)
+            intention.resume = None
+            self.__running_intentions.append(intention)    
+
     def drop_all_desires(self):
         """
         Stops and removes all **Intentions** and **Events** from the **Agent**.
@@ -1164,9 +1445,8 @@ class Agent:
         Stops and removes all **Intentions** from the **Agent**.
         """
         self.__intentions = []
-        for suspended_intention in self.__supended_intentions:
-            self._force_close_thread(suspended_intention[1])
-        self.__supended_intentions = []
+        for intention in list(self.__running_intentions) + [s[0] for s in self.__supended_intentions]:
+            self._cancel_intention(intention)
     
     def drop_desire(self, data_type: Belief | Goal):
         """
@@ -1202,9 +1482,33 @@ class Agent:
         data_type : Belief or Goal
             The data type used to remove intentions.
         """       
-        for intention in self.__intentions:
+        for intention in list(self.__intentions):
             if self._compare_data(intention.plan.trigger.data, data_type, ck_type=True, ck_values=True, ck_src=False): 
                 self.__intentions.remove(intention)
+                
+        for intention in list(self.__running_intentions) + [s[0] for s in self.__supended_intentions]:
+            if self._compare_data(intention.event.data, data_type, ck_type=True, ck_values=True, ck_src=False):
+                self._cancel_intention(intention)
+        
+    def _checkpoint(self):
+        """ Cancel point for plain plans: raises PlanCancelled (once) if the current Intention was dropped """
+        intention = _current_intention.get()
+        if intention is not None and intention.cancel_requested:
+            intention.cancel_requested = False  # raise once, so cleanup code can still call the agent API
+            raise PlanCancelled()
+    
+    def _cancel_intention(self, intention: Intention):
+        """ Drops an Intention: async plans are cancelled at their next await, plain plans at their next agent call """
+        if intention is None:
+            return
+        if inspect.iscoroutinefunction(intention.plan.body):
+            intention.drop_requested = True  # covers a plan whose task has not started yet
+            task = intention.task
+            if task is not None and not task.done() and self._loop is not None:
+                self._loop.call_soon_threadsafe(task.cancel)
+        else:
+            intention.cancel_requested = True
+            intention.sync_resume.set()   # wake it if it is inside wait() 
 
     def _get_running_intentions(self):
         return self.__running_intentions
@@ -1313,6 +1617,7 @@ class Agent:
             channel : (str, optional) 
                 The name of channel to send the message through. Defaults to DEFAULT_CHANNEL.
         """
+        self._checkpoint() # Checks if intention was dropped and closes it
         self.last_sent = []
         if type(target) is str and not target.split("_")[-1].isdigit():
             target = f"{target}_1"
@@ -1323,18 +1628,19 @@ class Agent:
                     msg = Ask(msg, self.my_name)
                     
                 msg.reply_event.clear()
-                future = self._msg_executor.submit(self._channels[channel]._send, self.my_name,target,msg_act,msg)
-                was_set = msg.reply_event.wait(timeout=2)
+                #future = self._msg_executor.submit(self._channels[channel]._send, self.my_name,target,msg_act,msg)
+                self._channels[channel]._send(self.my_name,target,msg_act,msg)     # delivery is just a deque append + a notify: no thread hop needed
+                was_set = msg.reply_event.wait(timeout=REPLY_TIMEOUT)
                 
                 if msg.reply_content is not None:
                     self.add(msg.reply_content, False, no_lock)
-                    if self.logging: self.logger.info(f'Reply for {msg} from {target}', extra=self.agent_info)
+                    if self.logging: self.logger.info(f"Reply for {msg} from {target}", extra=self.agent_info)
                     return msg.reply_content
                 elif was_set:
                     if self.logging:
                         self.logger.warning(f"{target} Doesnt have a reply for {msg}", extra=self.agent_info)
                     else:
-                        self.print("{target} Doesnt have a reply for {msg}")
+                        self.print(f"{target} Doesnt have a reply for {msg}")
                     return None
                 else:
                     if self.logging:
@@ -1343,19 +1649,20 @@ class Agent:
                         self.print(f"Timeout while waiting a reply for {msg}")    
                     return None
             else:
-                future = self._msg_executor.submit(self._channels[channel]._send, self.my_name,target,msg_act,msg)
+                #future = self._msg_executor.submit(self._channels[channel]._send, self.my_name,target,msg_act,msg)
+                self._channels[channel]._send(self.my_name,target,msg_act,msg)     # delivery is just a deque append + a notify: no thread hop needed
             
             ch = "in the default channel"
             if channel != DEFAULT_CHANNEL:
                 ch = f"in the channel {channel}"
             if isinstance(target,str | list): 
-                if self.logging: self.logger.debug(f'Send Message: {self.my_name}  to  {target}  -  {msg_act.name} {msg} {ch}', extra=self.agent_info)
+                if self.logging: self.logger.debug(f"Send Message: {self.my_name}  to  {target}  -  {msg_act.name} {msg} {ch}", extra=self.agent_info)
             else:
-                if self.logging: self.logger.debug(f'Send Message: {self.my_name}  broadcasting  {msg_act.name} {msg} {ch}', extra=self.agent_info)
+                if self.logging: self.logger.debug(f"Send Message: {self.my_name}  broadcasting  {msg_act.name} {msg} {ch}", extra=self.agent_info)
         except KeyError:
             if self.show_exec:
-                self.print(f'Not Connected to Selected Channel:{channel}')
-            if self.logging: self.logger.warning(f'Agent:{self.my_name} Not Connected to Selected Channel:{channel}', extra=self.agent_info)
+                self.print(f"Not Connected to Selected Channel:{channel}")
+            if self.logging: self.logger.warning(f"Agent:{self.my_name} Not Connected to Selected Channel:{channel}", extra=self.agent_info)
             raise KeyError(f"Connection Error: Not Connected to Selected Channel:{channel}")
         except AssertionError:
             raise
@@ -1376,26 +1683,27 @@ class Agent:
             channel : (str, optional) 
                 The name of channel to send the message through. Defaults to DEFAULT_CHANNEL.
         """
-        
+        self._checkpoint() # Checks if intention was dropped and closes it
         self.last_sent = []
         if type(target) is str and not target.split("_")[-1].isdigit():
             target = f"{target}_1"
         try:
             typ = "forget" if forget else "add"
-            future = self._msg_executor.submit(self._channels[channel]._sendf, self.my_name,target,msg,typ)
+            #future = self._msg_executor.submit(self._channels[channel]._sendf, self.my_name,target,msg,typ)
+            self._channels[channel]._sendf(self.my_name,target,msg,typ)
             self.last_sent.append((self.my_name,target,typ,msg))
             
             ch = "in the default channel"
             if channel != DEFAULT_CHANNEL:
                 ch = f"in the channel {channel}"
             if isinstance(target,str | list): 
-                if self.logging: self.logger.debug(f'Send Message: {self.my_name}  to  {target}  -  {typ} {msg} {ch}', extra=self.agent_info)
+                if self.logging: self.logger.debug(f"Send Message: {self.my_name}  to  {target}  -  {typ} {msg} {ch}", extra=self.agent_info)
             else:
-                if self.logging: self.logger.debug(f'Send Message: {self.my_name}  broadcasting  {typ} {msg} {ch}', extra=self.agent_info)
+                if self.logging: self.logger.debug(f"Send Message: {self.my_name}  broadcasting  {typ} {msg} {ch}", extra=self.agent_info)
         except KeyError:
             if self.show_exec:
-                self.print(f'Not Connected to Selected Channel:{channel}')
-            if self.logging: self.logger.warning(f'Agent:{self.my_name} Not Connected to Selected Channel:{channel}', extra=self.agent_info)
+                self.print(f"Not Connected to Selected Channel:{channel}")
+            if self.logging: self.logger.warning(f"Agent:{self.my_name} Not Connected to Selected Channel:{channel}", extra=self.agent_info)
         except AssertionError:
             raise
         return None
@@ -1430,19 +1738,22 @@ class Agent:
             #self._channels[channel]._send(self.my_name,target,msg_act,msg)
             typ = f'ask{"All" if all else ""}{"Reply" if wait_reply else ""}'
             msg.reply_event.clear()
-            future = self._msg_executor.submit(self._channels[channel]._sendf, self.my_name,target,msg,typ)
+            #future = self._msg_executor.submit(self._channels[channel]._sendf, self.my_name,target,msg,typ)
+            self._channels[channel]._sendf(self.my_name,target,msg,typ)
             self.last_sent.append((self.my_name,target,typ,msg))
-            was_set = msg.reply_event.wait(timeout=2)
+            if not wait_reply:      # the answer to a plain ask arrives later as an ordinary message; nothing sets the reply event, so waiting would only stall the caller
+                return None
+            was_set = msg.reply_event.wait(timeout=REPLY_TIMEOUT)
             
             if msg.reply_content is not None:
                 self.add(msg.reply_content, False, no_lock)
-                if self.logging: self.logger.info(f'Reply for {msg} from {target}', extra=self.agent_info)
+                if self.logging: self.logger.info(f"Reply for {msg} from {target}", extra=self.agent_info)
                 return msg.reply_content
             elif was_set:
                 if self.logging:
                     self.logger.warning(f"{target} Doesnt have a reply for {msg}", extra=self.agent_info)
                 else:
-                    self.print("{target} Doesnt have a reply for {msg}")
+                    self.print(f"{target} Doesnt have a reply for {msg}")
                 return None
             else:
                 if self.logging:
@@ -1477,7 +1788,7 @@ class Agent:
         else:
             if self.logging: self.logger.info(f'Saving Message to Mail: {msg}', extra=self.agent_info)
             self.saved_msgs.append((typ,msg,msg_flag))
-        self._notify_work()
+        self._notify_work(msg)
 
     def _mail(self, selection_function: Callable | None = None) -> None:
         """ 
@@ -1491,18 +1802,20 @@ class Agent:
         self.last_recv = []
         if callable(selection_function):
             selection_function(self.saved_msgs)
-        else:                
+        else:       
+            mailbox = self.saved_msgs         
             if self.read_all_mail:
-                with self.msg_lock:
-                    mail = list(self.saved_msgs)
-                    self.saved_msgs.clear()
-            elif self.saved_msgs:
-                mail = [self.saved_msgs.popleft()]
+                budget = len(mailbox)       # everything waiting right now (what arrives meanwhile is read next turn)
+            elif len(mailbox) > MAIL_BACKLOG:
+                budget = MAIL_BATCH         # the mailbox is backing up: one message per turn can't keep up
             else:
-                mail = []
+                budget = 1
             
-            while mail:
-                typ,msg,msg_flag = mail.pop(0)
+            for _ in range(budget):
+                try:
+                    typ,msg,msg_flag = mailbox.popleft()    # atomic, so senders can append meanwhile (clear() after list() lost those)
+                except IndexError:
+                    break
                 try:
                     self.last_recv.append((typ,msg))    
                     
@@ -1583,13 +1896,17 @@ class Agent:
                 if isinstance(found_data, list):
                     content: List[Belief|Goal|Plan] = []
                     for data in found_data:
-                        if isinstance(found_data, Belief):
+                        if isinstance(data, Belief):
                             content.append(Belief(
-                                found_data.name, found_data._values, 
-                                self.my_name, found_data.adds_event))
-                        elif isinstance(found_data, Goal):
+                                data.name, 
+                                data._values, 
+                                self.my_name, 
+                                data.adds_event))
+                        elif isinstance(data, Goal):
                             content.append(Goal(
-                                found_data.name, found_data._values,self.my_name
+                                data.name, 
+                                data._values, 
+                                self.my_name
                             ))
                     msg.reply_content = content
                 else:
@@ -1602,7 +1919,7 @@ class Agent:
 
             case 'untellHow':
                 assert isinstance(msg, Plan), f'Act untellHow must receive a Plan not {type(msg).__qualname__}'
-                self.add(msg, False, True)
+                self.rm(msg, False, True)
 
             case 'askHow':
                 assert isinstance(msg, Ask), f'Act askHow must request an Ask not {type(msg).__qualname__}'
@@ -1673,16 +1990,21 @@ class Agent:
                 if isinstance(found_data, list):
                     content: List[Belief|Goal|Plan] = []
                     for data in found_data:
-                        if isinstance(found_data, Belief):
+                        if isinstance(data, Belief):
                             content.append(Belief(
-                                found_data.name, found_data._values, 
-                                self.my_name, found_data.adds_event))
-                        elif isinstance(found_data, Goal):
-                            content.append(Goal(
-                                found_data.name, found_data._values,self.my_name
+                                data.name, 
+                                data._values, 
+                                self.my_name, 
+                                data.adds_event
                             ))
-                        elif isinstance(found_data, Plan):
-                            content.append(found_data)
+                        elif isinstance(data, Goal):
+                            content.append(Goal(
+                                data.name, 
+                                data._values,
+                                self.my_name
+                            ))
+                        elif isinstance(data, Plan):
+                            content.append(data)
                     msg.reply_content = content
                 else:
                     msg.reply_content = None
@@ -1781,7 +2103,13 @@ class Agent:
                 method = getattr(instance, name)
                 def wrapper(*args, **kwargs):
                     try:
-                        return method(self.my_name, *args, **kwargs) 
+                        #return method(self.my_name, *args, **kwargs)
+                        res = method(self.my_name, *args, **kwargs)
+                        if res is False:
+                            raise ActionFailed(f"Action '{name}' returned False in {instance.my_name}")
+                        return res
+                    except ActionFailed:
+                        raise 
                     except TypeError as e:
                         if "object is not callable" not in str(e):
                             raise 
@@ -1793,19 +2121,49 @@ class Agent:
         self.running = True
         self.paused_agent = False
         self.stop_flag = threading.Event()
+        # self._loop = asyncio.new_event_loop()
+        # self._loop.set_default_executor(self._plan_executor)   # sync plan bodies still run in the plan pool
+        # self._loop_thread = threading.Thread(target=self._loop.run_forever, daemon=True, name=f"{self.my_name}_loop")
+        # self._loop_thread.start()        
         self.thread = threading.Thread(target=self._cycle,args=(start_flag,self.stop_flag,))
         self.thread.start()
-    
+
+    def _ensure_loop(self) -> asyncio.AbstractEventLoop:
+        """ The agent's event loop (and its thread) only exists once the first `async def` plan needs it """
+        if self._loop is None:
+            with self._loop_lock:
+                if self._loop is None:
+                    loop = asyncio.new_event_loop()
+                    thread = threading.Thread(target=loop.run_forever, daemon=True, name=f"{self.my_name}_loop")
+                    thread.start()
+                    self._loop_thread = thread
+                    self._loop = loop
+        return self._loop
+
     def stop_cycle(self, log_flag=False) -> None:
         """Stops the Agent's Reasoning Cycle"""
         if self.running: 
             self.running = False
             if self.stop_flag is not None: self.stop_flag.set()
+            
+            if hasattr(self, '_work_condition') and self._work_condition is not None:
+                self._work_condition.set() 
+            
+            for i in list(self.__running_intentions) + [x[0] for x in self.__supended_intentions]:
+                self._cancel_intention(i)
+            if self._loop is not None and self._loop_thread is not None and self._loop_thread.is_alive():
+                asyncio.run_coroutine_threadsafe(self._shutdown_loop(), self._loop)
+                self._loop_thread.join(timeout=5)   
+                         
             self._plan_executor.shutdown(wait=False)
-            #self.print("Stopping Reasoning")
             if self.logging: self.logger.debug("Ending Reasoning", extra=self.agent_info)
             
-        
+    async def _shutdown_loop(self):
+        """ Cancels every running plan task, lets their cleanup run, then stops the loop """
+        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        for t in tasks: t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        asyncio.get_running_loop().stop()
                  
     def _cycle(self, start_flag: threading.Event, stop_flag: threading.Event) -> None:
         """
@@ -1820,6 +2178,7 @@ class Agent:
         """
         if start_flag is not None:
             start_flag.wait()
+        if self.logging: self.logger.debug("Starting Reasoning", extra=self.agent_info)
  
         self.cycle_counter = 1
         self.idle_counter = 0
@@ -1827,18 +2186,22 @@ class Agent:
             if self.paused_agent:
                 start_flag.wait()
             
-            self._work_condition.wait(timeout=1.0)
+            # pending events are retried by cycle count, so only they need the cycle to keep ticking
+            self._work_condition.wait(timeout=0.05 if self._pending_events else IDLE_WAIT)
             self._work_condition.clear()
             
             if stop_flag.is_set():
                 break
             
             if self._environments:
-                with self.update_lock: self._perception()
+                with self.update_lock: 
+                    self._perception()
             if self.saved_msgs:
-                with self.update_lock: self._mail()
+                with self.update_lock: 
+                    self._mail()
             
             num_running_intentions = self.__running_intentions.__len__()
+            has_work = False
             while True: # loop until there are no more events
                 self.curr_event, pending_flag = self._select_event()
                 if self.curr_event is None: # if no events, there will be no new intention
@@ -1849,17 +2212,23 @@ class Agent:
                     break
             
             intention = self._select_intention()
-            
+            if intention is not None:
+                has_work = True
+                
             if stop_flag.is_set():
                 break
             
             self._execute_intention(intention, num_running_intentions)
-            
-            if self.delay > 0:
-                self._delay()
+
+            # if self.delay > 0:
+            #     self._delay()
             self.cycle_counter += 1
+            
+            # one event/intention is handled per wake-up, so re-arm while more work is queued
+            if has_work or self.saved_msgs or self.__events or (self.__intentions and self.__running_intentions.__len__() < self.max_intentions):
+                self._work_condition.set()
     
-    def _notify_work(self):
+    def _notify_work(self, origin):
         if not self._work_condition.is_set():
             self._work_condition.set()
     
@@ -1894,7 +2263,12 @@ class Agent:
             The number of currently running Intentions
         """
         if intention is None: 
-            if num_running_intentions < self.max_intentions and self._strategies and self.auto_action:
+            if (
+                num_running_intentions < self.max_intentions 
+                and self._strategies 
+                and self.auto_action
+                and any(not strategy.get_state()[1] for strategy in self._strategies)
+            ):
                 self.idle_counter = 0
                 future = self._plan_executor.submit(self._execute_strategy)
             elif num_running_intentions > 0:
@@ -1907,11 +2281,12 @@ class Agent:
                     self.last_log = "idle"
                     if self.show_exec: self.print("Idle")
                     if self.logging: self.logger.debug("Idle", extra=self.agent_info)
-                try:
-                    self.idle_counter += 1
+                self.idle_counter += 1
+                if hasattr(self, 'on_idle'):
                     future = self._plan_executor.submit(self.on_idle)
-                except Exception as e:
-                    ...
+                else:
+                    if not self.saved_msgs:
+                        self._work_condition.wait(0.02)
         else:
             self.idle_counter = 0
             self.last_log = "Running Intention"
@@ -1929,16 +2304,13 @@ class Agent:
                 continue
             int_action = strat.get_action(state)
             env = self._environments[strat.env.my_name]
-            str_action = strat.actions_list[int_action]
-            action = strat.actions_dict[str_action]
+            action, str_action, takes_value = strat.resolve_action(int_action)
             if self.show_exec: self.print(f"Executing Strategy {strat.name}({str_action})")
             if self.logging: self.logger.debug(f"Executing Strategy {strat.name}({str_action})", extra=self.agent_info)
-            if not isinstance(str_action, str):
-                str_action = str_action.original
-            if len(action.data) == 1:
-                action.func(env, self.my_name)
-            else:
+            if takes_value:
                 action.func(env, self.my_name, str_action)
+            else:
+                action.func(env, self.my_name)
             break
     
     def _cycle_decision(self, 
@@ -1958,12 +2330,11 @@ class Agent:
                     continue
                 int_action = strat.get_action(state)
                 env = self._environments[strat.name]
-                str_action = strat.actions_list[int_action]
-                action = strat.actions_dict[str_action]
-                if len(action.data) == 1:
-                    action.func(env, self.my_name)
-                else:
+                action, str_action, takes_value = strat.resolve_action(int_action)
+                if takes_value:
                     action.func(env, self.my_name, str_action)
+                else:
+                    action.func(env, self.my_name)
                 decision = "Execute Strategy"
                 description = f'state: {state} action:{str_action}'
                 break
@@ -2011,30 +2382,66 @@ class Agent:
                     continue
                 int_action = strat.get_action(state)
                 
-            str_action = strat.actions_list[int_action]
+            action, str_action, _ = strat.resolve_action(int_action)
             decision = "Execute Strategy"
             description = f'state: {state} action: {str_action}'
             if self.logging: self.logger.debug(f'{decision}: {description}', extra=self.agent_info)
-            return str_action.original, strat.actions_dict[str_action].func
+            return str_action, action.func
         
         if self.show_exec: self.print(f"No policy for Environment: {env_name}")
         if self.logging: self.logger.warning(f"No policy for Environment: {env_name}", extra=self.agent_info)
         return None
     
+    def update_learning(self, env_name: str, action, state, new_state, reward: float | None = None, terminated: bool | None = None):
+        """
+        Updates the model of the given Environment with a step that was actually taken
+        
+        Parameters
+        ----------
+            env_name : str
+                The name of the Environment the Agent has a trained model for.
+            action : Any
+                The value that the Action was executed with
+            state : Any
+                The state where the Action was taken
+            new_state : Any
+                The state that was reached
+            reward : float, optional
+                The reward received. Evaluated with the transition function of the model when not given
+            terminated : bool, optional
+                Whether the step ended the episode. Evaluated with the transition function of the model when not given
+        """
+        for strat in self._strategies:
+            if strat.name not in {f"Model_{env_name}", f"Model_{self.my_name}_{env_name}"}:
+                continue
+            strat.update_learning(action, state, new_state, reward, terminated)
+    
     def _perception(self) -> None:
         """ 
             Perceives all connected Environments and updates the agent's beliefs
+            Environments that did not change since it was last perceived are skipped
         """
         percept_dict: Dict[str, dict] = dict()
+        changed: Set[str] = set()
+        #if self.logging: self.logger.info(f"Starting Perception [{self.cycle_counter}]", extra=self.agent_info)
         with self.env_lock:
-            for env_name in self._environments:
-                percepts = self._environments[env_name]._perception()
+            for env_name, env in self._environments.items():
+                #if self.logging: self.logger.info(f"Perceiving {env_name} [{self.cycle_counter}]", extra=self.agent_info)
+                snapshot = getattr(env, "_perception_snapshot", None)
+                if snapshot is None:                    # an Environment without versioning is always perceived
+                    percepts = env._perception()
+                else:
+                    if self._env_versions.get(env_name) == env._version:
+                        continue
+                    version, percepts = snapshot()
+                    self._env_versions[env_name] = version
+                changed.add(env_name)
                 percepts = self._apply_filters(percepts,env_name)
                 merge_dicts(percepts,percept_dict)
         if percept_dict == {}:
             return
         self._env_changed_count = 0
-        self._revision(percept_dict)
+        self._revision(percept_dict, changed)
     
     def _apply_filters(self, percepts: Dict[str, Dict[str, Set[Percept]]], env_name: str):
         """ 
@@ -2069,11 +2476,13 @@ class Agent:
             return
         
         percept_dict: Dict[str, dict] = dict()
+        perceived: Set[str] = set()
         if isinstance(env_name, list):
             for name in env_name:
                 try:
                     percepts = self._environments[name]._perception()
                     percepts = self._apply_filters(percepts,name)
+                    perceived.add(name)
                     if self.logging: self.logger.info(f"Perceiving {name} : {percepts}", extra=self.agent_info)
                     merge_dicts(percepts,percept_dict)
                 except KeyError:
@@ -2083,13 +2492,14 @@ class Agent:
             try:
                 percept_dict = self._environments[env_name]._perception()
                 percept_dict = self._apply_filters(percept_dict,env_name)
+                perceived.add(env_name)
                 if self.logging: self.logger.info(f"Perceiving {env_name} : {percept_dict}", extra=self.agent_info)
             except KeyError:
                 if self.show_exec: self.print(f"Not Connected to Environment:{env_name}")
                 if self.logging: self.logger.warning(f"Not Connected to Environment:{env_name}", extra=self.agent_info)
         
         #belief_dict = self._percepts_to_beliefs_new(percept_dict)
-        self._revision(percept_dict)
+        self._revision(percept_dict, perceived)
     
     def _percepts_to_beliefs(self,percepts: Dict[str, Dict[str, Set[Percept]]]) -> Dict[str, Dict[str, Set[Belief]]]:
         """ 
@@ -2115,18 +2525,50 @@ class Agent:
         }
         return beliefs
                     
-    def _revision(self, new_dict: Dict[str, Dict[str, Set[Percept]]]) -> None:
+    def _view_update(self, source: str, key: str, gained: Iterable[Percept]) -> None:
+        """ Adds newly perceived Percepts to `_perception_beliefs` (the perceptions as Beliefs, used by get()) """
+        beliefs = self._perception_beliefs.setdefault(source, {}).setdefault(key, set())
+        for percept in gained:
+            belief = Belief(percept.name, percept._values, source, percept.adds_event)
+            beliefs.add(belief)
+            if values_are_wild(belief._values):
+                self._wild_percept_keys.add((source, key))
+    
+    def _view_rebuild(self, touched: Set[tuple[str, str]]) -> None:
+        """ 
+            Rebuilds the Beliefs of the given (source, key) from `__perceptions`. 
+            Needed after a loss: Percepts that only differ by group are the same Belief, so a lost Percept cannot simply be discarded
+        """
+        for source, key in touched:
+            percepts = self.__perceptions.get(source, {}).get(key)
+            if percepts is None:
+                self._perception_beliefs.get(source, {}).pop(key, None)
+                continue
+            beliefs = {Belief(p.name, p._values, source, p.adds_event) for p in percepts}
+            self._perception_beliefs.setdefault(source, {})[key] = beliefs
+            if any(values_are_wild(b._values) for b in beliefs):
+                self._wild_percept_keys.add((source, key))
+    
+    def _revision(self, new_dict: Dict[str, Dict[str, Set[Percept]]], only: Optional[Set[str]] = None) -> None:
         """ 
             Revisions the agent's beliefs based on the new perceptions
+            `only` limits the revision to the given sources (Environments), the others keep their perceptions
         """
+        touched: Set[tuple[str, str]] = set()
         for source, keys in self.__perceptions.copy().items():
-            if source not in self._environments.keys() or isinstance(source, tuple):
+            if source not in self._environments.keys() or isinstance(source, tuple): # Not an Environment
+                continue
+            if only is not None and source not in only: # Only revisions the given Environments
                 continue
             if source in new_dict:
                 for key, beliefs in keys.copy().items():
                     if key in new_dict[source]: 
                         new_beliefs, gained_beliefs, lost_beliefs = set_changes(beliefs,new_dict[source][key])
                         self.__perceptions[source][key] = new_beliefs
+                        if gained_beliefs:
+                            self._view_update(source, key, gained_beliefs)
+                        if lost_beliefs:
+                            touched.add((source, key))
                         self._new_event(gain, gained_beliefs) # Gained new specific belief
                         self._new_event(lose, lost_beliefs) # Lost an old specific belief
                         del new_dict[source][key]
@@ -2138,6 +2580,7 @@ class Agent:
                         self._new_event(lose, self.__perceptions[source][key]) # Lost whole key belief
                         if self.logging: self.logger.debug(f"Beliefs Lost: {source} {key} Beliefs lost in revision: {self.__perceptions[source][key]}", extra=self.agent_info)
                         del self.__perceptions[source][key]
+                        self._perception_beliefs.get(source, {}).pop(key, None)
                         
                 if new_dict[source] == {}:
                     del new_dict[source]
@@ -2146,25 +2589,35 @@ class Agent:
                     if self.logging: self.logger.debug(f"Beliefs Lost: {source} Beliefs lost in revision: {beliefs}", extra=self.agent_info)
                     self._new_event(lose, beliefs) # Lost whole source of belief (env)
                 del self.__perceptions[source]
+                self._perception_beliefs.pop(source, None)
         
         for source,keys in new_dict.items():
-            for beliefs in keys.values():
+            for key, beliefs in keys.items():
                 if self.logging: self.logger.debug(f"Beliefs Gained: Rest of {source} Beliefs gained in revision: {beliefs}", extra=self.agent_info)
                 self._new_event(gain, beliefs) # Gained beliefs of new sources/keys
+                self._view_update(source, key, beliefs)
                 
         merge_dicts(new_dict,self.__perceptions)
+        self._view_rebuild(touched)
     
     def _select_event(self) -> tuple[Event, bool] | tuple[None, bool]:
         """ 
             Selects the next Event (FIFO) to be processed 
+            (Checks for pending events if idlee or if it a pending event was not checked for a while)
         """
-        if self.__events == []:
-            if self._pending_events != [] and self._pending_events[0][1] > self.cycle_counter:
-                return self._pending_events.pop(0)[0], False
-            else:
-                return None, False
-        else:
+        is_idle = len(self.__events) == 0
+        timer_expired = self.cycle_counter >= self._last_pending_checked + 2*PENDING_TIMER
+        
+        if (is_idle or timer_expired) and self._pending_events:
+            if self._pending_events[0][1] <= self.cycle_counter:
+                self._last_pending_checked = self.cycle_counter
+                event_tpl = self._pending_events.pop(0)
+                return event_tpl[0], False
+                
+        if self.__events:
             return self.__events.pop(0), True
+    
+        return None, False
     
     def _instant_plan(self, event: Event):
         """ Executes the plan triggered by the event immediately """
@@ -2178,8 +2631,6 @@ class Agent:
             elif isinstance(event.data,Belief):
                 if self.logging:
                     self.logger.debug(f"Doesn't have Plan with {event} as trigger event", extra=self.agent_info)
-                else:
-                    self.print(f"Doesn't have Plan with {event} as trigger event")
             return
             
         args = None
@@ -2231,7 +2682,7 @@ class Agent:
                 else:
                     typ = event.data
                     self.__goals[typ.source][typ.name].remove(typ)
-                    self._new_event(failure, event.data, instant=False)
+                    self._new_event(failure, event.data)
             elif event is not None and isinstance(event.data,Belief):
                 if self.logging: self.logger.debug(f"Doesn't have Plan for {event} as trigger event", extra=self.agent_info)
             return
@@ -2270,7 +2721,7 @@ class Agent:
             else:
                 typ = event.data
                 self.__goals[typ.source][typ.name].remove(typ)
-                self._new_event(failure, event.data, instant=False)
+                self._new_event(failure, event.data)
     
     def _select_intention(self) -> Intention | None:    
         """ 
@@ -2305,6 +2756,8 @@ class Agent:
                 if not ctxt:
                     return None
                 assert isinstance(ctxt, Belief | Goal), f"{self.my_name} > {plan.context.left_value} - Unexpected Context Type: {type(ctxt)}, Expected Belief | Goal"
+                if not any(v is Any for v in plan.context.left_value._values):
+                    return tuple()
                 if ctxt.v_len == 1:
                     return ctxt._values
                 else:
@@ -2313,10 +2766,17 @@ class Agent:
                 if PRINT_CHECKS: self.print(f'Starting Check: {plan.context}')
                 c_args,_ = self._check(plan.context)
                 #print(f'{plan.body.__name__} - Context: {plan.context} - Context Args: {c_args}')
-                if c_args and len(c_args) == 1:
-                    return c_args[0]
-                else:
-                    return c_args
+                # if c_args and len(c_args) == 1:
+                #     return c_args[0]
+                # else:
+                #     return c_args
+                if c_args is None:
+                    return None
+                shared: dict = {}
+                for key, arg in zip(self._any_keys(plan.context), c_args):
+                    if shared.get(key) is None:
+                        shared[key] = arg
+                return tuple(shared.values())
         else:
             return tuple()
     
@@ -2405,11 +2865,15 @@ class Agent:
             return None, tupled
         
         f_args: tuple = tuple()
+        if v0_args and v0_data is None:
+            f_args += (None,) * self._count_any(condition.left_value)
         if v0_args and v0_data is not None:
             if not v0_tupled:
                 f_args += (v0_data,)
             else:
                 f_args += v0_data
+        if v1_args and v1_data is None:
+            f_args += (None,) * self._count_any(condition.right_value)
         if v1_args and v1_data is not None:
             if not v1_tupled:
                 f_args += (v1_data,)
@@ -2419,23 +2883,22 @@ class Agent:
         
         if PRINT_CHECKS: self.print(f'End of Check: {f_args}')
         return f_args, True
-    
-    def _force_close_thread(self, thread: threading.Thread):
-        """ 
-        Forces the thread to close
-        
-        Used to kill executing Intentions as a last resort
-        """
-        thread_id = thread.ident
-        assert isinstance(thread_id, int)
-        res = ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(thread_id), ctypes.py_object(SystemExit))
-        if res == 0:
-            raise ValueError("Invalid thread ID")
-        elif res > 1:
-            ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(thread_id), None)
-            raise SystemError("Exception raise failed")
-        self.print(f"Exception raised in thread {thread_id}")
-        thread.join()
+
+    def _count_any(self, value) -> int:
+        """ Number of Beliefs/Goals/Percepts containing an Any, ignoring anything under a ~ """
+        if isinstance(value, Belief | Goal | Percept):
+            return int(any(v is Any for v in value._values))
+        if isinstance(value, Condition) and value.c_type != "~":
+            return self._count_any(value.left_value) + self._count_any(value.right_value)
+        return 0
+
+    def _any_keys(self, value) -> list:
+        """ Ordered (type, name) keys of the Beliefs/Goals/Percepts containing an Any, ignoring anything under a ~ """
+        if isinstance(value, Belief | Goal | Percept):
+            return [(type(value), value.name)] if any(v is Any for v in value._values) else []
+        if isinstance(value, Condition) and value.c_type != "~":
+            return self._any_keys(value.left_value) + self._any_keys(value.right_value)
+        return []
     
     def _execute_plan(self, intention: Intention):
         """ Starts the executes of a Intention's Plan in separate thread """
@@ -2451,7 +2914,15 @@ class Agent:
             if intention.plan.plan_type.name == "atomic":
                 result = self._run_plan(intention)
             else:
-                result = self._plan_executor.submit(self._run_plan, intention)
+                #result = self._plan_executor.submit(self._run_plan, intention)
+                # if self._loop is None: 
+                #     self.logger.error("Loop not initialized", extra=self.agent_info)
+                #     raise RunPlanError
+                # intention.future = asyncio.run_coroutine_threadsafe(self._run_plan_async(intention), self._loop)
+                if inspect.iscoroutinefunction(intention.plan.body):
+                    intention.future = asyncio.run_coroutine_threadsafe(self._run_plan_async(intention), self._ensure_loop())
+                else:      # a plain `def` plan: straight to the plan pool, no event loop involved
+                    intention.future = self._plan_executor.submit(self._run_plan_sync, intention)
             
         except RunPlanError:
             if self.logging:
@@ -2460,48 +2931,130 @@ class Agent:
                 self.print(f"Intention {intention} failed")
 
     def _run_plan(self, intention: Intention, instant_flag: bool = False):
+        """ Sync entry point (instant/atomic plans): runs the plan on the agent's loop and waits for it """
+        # if self._loop is None: 
+        #     self.logger.error("Loop not initialized", extra=self.agent_info)
+        #     raise RunPlanError
+        if not inspect.iscoroutinefunction(intention.plan.body):
+            return self._run_plan_sync(intention, instant_flag)          # plain `def` plan: runs right here, like before
+        loop = self._ensure_loop()
+        
+        coro = self._run_plan_async(intention, instant_flag)
+        if threading.current_thread() is self._loop_thread:      # called from inside an async plan: don't block the loop
+            #intention.future = self._loop.create_task(coro)
+            intention.future = loop.create_task(coro)
+            return None
+        #intention.future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        intention.future = asyncio.run_coroutine_threadsafe(coro, loop)
+        return intention.future.result()
+
+    def _plan_started(self, intention: Intention) -> None:
+         if self.logging: self.logger.debug(f"Executing Intention : {intention}", extra=self.agent_info)
+         if self.show_exec or self.show_cycle: self.print(f"Executing Intention : {intention}")
+
+    def _run_plan_sync(self, intention: Intention, instant_flag: bool = False):
+        """ Executes a plain `def` Plan directly on the calling thread (no event loop, no extra thread hop) """
+        self._plan_started(intention)
+        token = _current_intention.set(intention)
+        try:
+            assert intention.event.data is not None, f"{intention.event.data} data is None"
+            result = intention.plan.body(self, intention.event.data.source, *intention.args)
+            return self._plan_finished(intention, result, instant_flag)
+        except (asyncio.CancelledError, PlanCancelled, ActionFailed, Exception) as exc:
+            return self._plan_failed(intention, exc)
+        finally:
+            _current_intention.reset(token)
+
+    async def _run_plan_async(self, intention: Intention, instant_flag: bool = False):
+        """ Executes an `async def` Plan on the agent's event loop, where it can be cancelled at every await """
+        self._plan_started(intention)
         """ Where the actual execution of a Intention's Plan occurs """
         if self.logging: self.logger.debug(f"Executing Intention : {intention}", extra=self.agent_info)
         if self.show_exec or self.show_cycle: self.print(f"Executing Intention : {intention}")
         try:     
             assert intention.event.data is not None, f"{intention.event.data} data is None"
-            result = intention.plan.body(self, intention.event.data.source, *intention.args)
-                
-            self.last_event = intention.event
-            trigger_data = intention.event.data    
-            if result == "Error" or result == -1:
-                if self.logging:
-                    self.logger.warning(f"Intention {intention} did not complete successfully", extra=self.agent_info)
-                else:
-                    self.print(f"Intention {intention} did not complete successfully, recreating Event {intention.event}")
+            #result = intention.plan.body(self, intention.event.data.source, *intention.args)
+            intention.task = asyncio.current_task()  # no await before this, so a drop can never miss the task
+            if intention.drop_requested:
+                raise asyncio.CancelledError()
+            _current_intention.set(intention)
+            body = intention.plan.body
+            if inspect.iscoroutinefunction(body):
+                result = await body(self, intention.event.data.source, *intention.args) # cancellable at every await
             else:
-                #print(f'Remove {(plan,trigger,args)} in {self.__intentions}',flush=True)
-                #self.__intentions.remove((plan,trigger,args))
-                if intention.plan.plan_type.name == 'atomic':
-                    self.max_intentions = self.og_max_intentions
-                if not instant_flag:
-                    self.__running_intentions.remove(intention)
-                    self.last_intention = intention
+                result = await asyncio.to_thread(body, self, intention.event.data.source, *intention.args)  # runs to completion   
+             
+            return self._plan_finished(intention, result, instant_flag)
+        except (asyncio.CancelledError, PlanCancelled, ActionFailed, Exception) as exc:
+            return self._plan_failed(intention, exc)
+    
+    def _plan_finished(self, intention: Intention, result: Any, instant_flag: bool = False):
+        """ What happens after a Plan's body ran to completion """
+        self.last_event = intention.event
+        trigger_data = intention.event.data    
+        if result == "Error" or result == -1:
+            if self.logging:
+                self.logger.warning(f"Intention {intention} did not complete successfully", extra=self.agent_info)
+            else:
+                self.print(f"Intention {intention} did not complete successfully, recreating Event {intention.event}")
+        elif result is False or isinstance(result, ActionFailed):
+            if type(trigger_data) is Goal and self.has(trigger_data):
+                self.rm(trigger_data)
+            assert trigger_data is not None, f"{intention} data is None"
+            self._new_event(failure, trigger_data)
+            if self.show_exec:
+                self.print(f"{intention} failed action execution, triggered failure event")
+            if self.logging: self.logger.info(f"{intention.event} failed action execution", extra=self.agent_info)
+        else:
+            #print(f'Remove {(plan,trigger,args)} in {self.__intentions}',flush=True)
+            #self.__intentions.remove((plan,trigger,args))
+            if intention.plan.plan_type.name == 'atomic':
+                self.max_intentions = self.og_max_intentions
+            if not instant_flag:
+                self.__running_intentions.remove(intention)
+                self.last_intention = intention
 
-                if type(trigger_data) is Goal:
-                    self.last_goal = trigger_data
-                    if self.has(trigger_data) and result == False:
-                        #self.__intentions.append((plan,trigger,args))
-                        self._new_event(gain, trigger_data, instant=False)
-                    elif self.has(trigger_data) and result != False:
-                        self.rm(trigger_data)
-                        self._new_event(success, trigger_data, instant=False)
-                        if self.show_exec:
-                            self.print(f"{intention} successfully cleared")
-                        if self.logging: self.logger.info(f"{intention.event} cleared", extra=self.agent_info)
-                    else:
-                        if self.logging:
-                            self.logger.warning(f"{trigger_data} already cleared by another plan's execution", extra=self.agent_info)
-                        else:
-                            self.print(f"{trigger_data} already cleared by another plan's execution")
+            if type(trigger_data) is Goal:
+                self.last_goal = trigger_data
+                if self.has(trigger_data) and result == False:
+                    #self.__intentions.append((plan,trigger,args))
+                    self._new_event(gain, trigger_data)
+                elif self.has(trigger_data) and result != False:
+                    self.rm(trigger_data)
+                    self._new_event(success, trigger_data)
+                    if self.show_exec:
+                        self.print(f"{intention} successfully cleared")
+                    if self.logging: self.logger.info(f"{intention.event} cleared", extra=self.agent_info)
+                else:
+                    self.print(f"{trigger_data} already cleared by another plan's execution")
+        self.last_plan = intention.plan
+        return result
+
+    def _plan_failed(self, intention: Intention, exc: BaseException):
+        """ Handles a Plan that was cancelled, failed an action or raised. Must be called from inside the `except` block """
+        if isinstance(exc, (asyncio.CancelledError, PlanCancelled)):
+            if intention in self.__running_intentions: self.__running_intentions.remove(intention)
+            if intention.plan.plan_type.name == 'atomic': self.max_intentions = self.og_max_intentions
+            if self.logging: self.logger.info(f"Intention {intention} cancelled", extra=self.agent_info)
+            if isinstance(exc, asyncio.CancelledError): raise exc
+            return None
+        if isinstance(exc, ActionFailed):
+            af = exc
+            if intention in self.__running_intentions: self.__running_intentions.remove(intention)
+            if intention.plan.plan_type.name == 'atomic': self.max_intentions = self.og_max_intentions
+            triggr_data = intention.event.data
+            if triggr_data is not None:
+                if type(triggr_data) is Goal and self.has(triggr_data):
+                    self.rm(triggr_data)
+                self._new_event(failure, triggr_data)
             self.last_plan = intention.plan
-            return result
-        except Exception as e:
+            if self.show_exec or self.show_cycle:
+                self.print(f"Action failed in {intention}: {af}")
+            if self.logging:
+                self.logger.warning(f"Action failed in {intention}: {af}", extra=self.agent_info)
+            return False
+        if isinstance(exc, Exception):
+            e = exc
             buffer = ""
             _, _, exc_traceback = sys.exc_info()
             tb_entries = extract_tb(exc_traceback)
@@ -2536,37 +3089,8 @@ class Agent:
             print(buffer)
             self.logger.error(buffer, extra=self.agent_info)
             exit(-1) 
+        raise exc
     
-    def save_cycle_log(self, decision: str, description: Any | None = None, event: Event | None = None, plans: List[Plan] | None = None) -> None:
-        log: Dict[str, Any] = {"cycle":self.cycle_counter}
-        info = {
-            "decision":decision,
-            "description":description,
-            "beliefs":self.belief_list.copy(),
-            "goals":self.goal_list.copy(),
-            "running_goal":self.last_goal,
-            "last_recv":self.last_recv,
-            "event":event,
-            "last_event":self.last_event,
-            "retrieved_plans":plans,
-            "intentions":self.__intentions.copy(),
-            "events":self.__events.copy(),
-            "connected_envs":list(self._environments.keys()), 
-            "connected_chs":list(self._channels.keys())
-        }
-        self.last_recv = []
-        self.last_goal = None
-        if self.last_log != info and (self.running or self.cycle_counter == 0):
-            if self.running is False:
-                log["cycle"] = "Setup"
-            self.last_log = info
-            log.update(info)
-            sys_time = self.sys_time()
-            if sys_time in self.cycle_log:
-                self.cycle_log[sys_time].append(log)
-            else:
-                self.cycle_log[sys_time] = [log]
-      
     def _format_data(self, decision: str, chosen_plan: Plan | None = None, trgr: Event | None = None, args: tuple | None = None, data_type: Iterable[Belief | Goal | Plan] | Belief | Goal | Plan | None = None, instant: bool | None = False) -> str:
         match decision:
             case "Adding Info" | "Removing Info" | "Testing Info":

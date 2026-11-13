@@ -98,8 +98,11 @@ class bcolors(bcolorsMeta):
         cls.Colors_Dict[t_name] = (num + 1, cls.Colors_Dict[t_name][1])
         return color
 
+
+ValueType = int | float | str | tuple[int, ...] | list[Any] | dict[str, Any]
+
 class Condition:
-    def __init__(self, c_type: str, str_type: str, left_value: Condition | Belief | Goal, right_value: Condition | Belief | Goal | None = None, func: Optional[Callable] = None) -> None:
+    def __init__(self, c_type: str, str_type: str, left_value: Condition | Belief | Goal, right_value: Condition | Belief | Goal | ValueType | None = None, func: Optional[Callable] = None) -> None:
         self.c_type = c_type
         self.str_type = str_type
         self.func = func
@@ -118,19 +121,19 @@ class Condition:
     def __xor__(self, other: Condition | Belief | Goal) -> Condition:
         return Condition("op", "^", self, other, lambda x,y: x ^ y)
     
-    def __lt__(self, other: Condition | Belief | Goal) -> Condition:
+    def __lt__(self, other: Condition | Belief | Goal | ValueType) -> Condition:
         return Condition("comp", "<", self,other, lambda x,y: x < y)
     
-    def __le__(self, other: Condition | Belief | Goal) -> Condition:
+    def __le__(self, other: Condition | Belief | Goal | ValueType) -> Condition:
         return Condition("comp", "<=", self,other, lambda x,y: x <= y)
     
-    def __gt__(self, other: Condition | Belief | Goal) -> Condition:
+    def __gt__(self, other: Condition | Belief | Goal | ValueType) -> Condition:
         return Condition("comp", ">", self,other, lambda x,y: x > y)
     
-    def __ge__(self, other: Condition | Belief | Goal) -> Condition:
+    def __ge__(self, other: Condition | Belief | Goal | ValueType) -> Condition:
         return Condition("comp", ">=", self,other, lambda x,y: x >= y)
     
-    def __ne__(self, value: Belief | Goal) -> Condition: # type: ignore [override]
+    def __ne__(self, value: Belief | Goal | ValueType) -> Condition: # type: ignore [override]
         return Condition("comp", "!=", self,value, lambda x,y: x != y)
     
     def __str__(self) -> str:
@@ -141,47 +144,6 @@ class Condition:
     
     def __repr__(self) -> str:
         return self.__str__()
-
-class RWLock:
-    """Multiple simultaneous readers, exclusive writers."""
-    def __init__(self):
-        self._read_ready = threading.Condition(threading.Lock())
-        self._readers = 0
-
-    def acquire_read(self):
-        with self._read_ready:
-            self._readers += 1
-
-    def release_read(self):
-        with self._read_ready:
-            self._readers -= 1
-            if self._readers == 0:
-                self._read_ready.notify_all()
-
-    def acquire_write(self):
-        self._read_ready.acquire()
-        while self._readers > 0:
-            self._read_ready.wait()
-
-    def release_write(self):
-        self._read_ready.release()
-
-    # Context managers for convenience
-    from contextlib import contextmanager
-
-    def reading(self):
-        self.acquire_read()
-        try:
-            yield
-        finally:
-            self.release_read()
-
-    def writing(self):
-        self.acquire_write()
-        try:
-            yield
-        finally:
-            self.release_write()
 
 def fill_anys(template: str, values_str: str) -> str:
     values = ast.literal_eval(values_str)

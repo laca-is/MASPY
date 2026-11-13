@@ -53,7 +53,7 @@ class Model(Generic[ObsType, ActType]):
     _np_random: np.random.Generator | None = None
     _np_random_seed: int | None = None
 
-    def look(self, action: ActType) -> Tuple[tuple, SupportsFloat, bool, bool, dict[str, Any]]:
+    def look(self, action: ActType) -> Tuple[HashableWrapper, SupportsFloat, bool, bool, dict[str, Any]]:
         """ Look at a action step in the model """
         transitions = self.P[self.curr_state][action]
         i = categorical_sample([t[0] for t in transitions], self.np_random)
@@ -77,8 +77,23 @@ class Model(Generic[ObsType, ActType]):
         self.last_action = action
         assert self.curr_state is not None, "State cannot be None after step"
         return self.curr_state, r, t, False, {"prob": p}
+    
+    def state_step(self, state: HashableWrapper, action: ActType) -> Tuple[HashableWrapper, SupportsFloat, bool, bool, dict[str, Any]]:
+        try:
+            transitions = self.P[state][action]
+        except KeyError:
+            buffer=f'\n## Key Error > {state} : {action} [{self.P}]\n'
+            for buff in self.states_buffer:
+                buffer+=f'\t > {buff}\n'
+            print(buffer)
+            raise KeyError
+        print(f'\n## Transitions > {state} : {action} | [{self.P[state]}] = {transitions}')
+        i = categorical_sample([t[0] for t in transitions], self.np_random)
+        p, s, r, t = transitions[i]
+        return state, r, t, False, {"prob": p}
         
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> Tuple[tuple | HashableWrapper, dict[str, Any]]: # type: ignore
+        
+    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> Tuple[HashableWrapper, dict[str, Any]]: # type: ignore
         """ Reset the model to an initial state """
         if seed is not None:
             self._np_random, self._np_random_seed = utl_np_random(seed)

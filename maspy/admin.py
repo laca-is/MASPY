@@ -11,14 +11,13 @@ import signal
 import json
 import logging.config
 import logging.handlers
-import pandas as pd # type: ignore
 from time import sleep, time
 from pathlib import Path
 import atexit
 import os
 import sys, queue
 
-MASPY_VERSION = "2026.05.13"
+MASPY_VERSION = "2026.11.12"
 
 TAgent = TypeVar('TAgent', bound=Agent)
 TEnv = TypeVar('TEnv', bound=Environment)
@@ -106,8 +105,10 @@ class AdminMeta(type):
         return cls._instances[cls]
     
     def reset_instance(cls, *args, **kwargs):
-        cls._instances = super().__call__(*args, **kwargs)
-        return cls._instances[cls]
+        cls._instances = {}
+        instance = super().__call__(*args, **kwargs)
+        cls._instances[cls] = instance
+        return instance
     
 class Admin(metaclass=AdminMeta):
     """Administrator Singleton Class in charge of configuration, exectution, debugging and logging of the MASPY program.
@@ -130,6 +131,7 @@ class Admin(metaclass=AdminMeta):
         signal.signal(signal.SIGINT, self.stop_system)
         self.logging = False
         self.end_of_execution = False
+        self._stopping = False
         self._name = f"# {type(self).__name__} #"
         self.print(f"Starting MASPY Program - ver.{MASPY_VERSION}")
         if all_log:
@@ -212,7 +214,8 @@ class Admin(metaclass=AdminMeta):
             type(env)._instances.pop(env.my_name)
         for ch in self._channels.values():
             type(ch)._instances.pop(ch.my_name)
-        type(self)._instances = {}
+        type(self)._instances.clear()
+        self._stopping = False
     
     def print(self,*args, **kwargs):
         """Formatted MASPY Print Function"""
@@ -272,7 +275,7 @@ class Admin(metaclass=AdminMeta):
             agent.tcolor = color
 
         self.print(
-            f"Registering Agent {type(agent).__name__}:{"_".join(str(x) for x in agent.tuple_name)}"
+            f"Registering Agent {type(agent).__name__}:{'_'.join(str(x) for x in agent.tuple_name)}"
         ) if self.show_exec else ...
 
     def rm_agents(
@@ -295,7 +298,7 @@ class Admin(metaclass=AdminMeta):
             del self._agents[agent.tuple_name]
             del self._agent_list[agent.tuple_name]
         self.print(
-            f"Removing Agent {type(agent).__name__}:{"_".join(str(x) for x in agent.tuple_name)} from System List"
+            f"Removing Agent {type(agent).__name__}:{'_'.join(str(x) for x in agent.tuple_name)} from System List"
         ) if self.show_exec else ...
 
     def _add_channel(self, channel: Channel) -> None:
@@ -501,6 +504,10 @@ class Admin(metaclass=AdminMeta):
       
     def stop_system(self,sig=None,frame=None):
         """ Stops all agents cycles """
+        if getattr(self, "_stopping", False):
+            return
+        self._stopping = True
+        
         self.logger.info("Ending MASPY Program", extra={"class_name": "Admin", "my_name": ""})
         # if self._report_lock:
         #     return
@@ -583,6 +590,7 @@ class Admin(metaclass=AdminMeta):
                     "Goals": instance_data.get("goals", None),
                 }
                 rows.append(row)
+        import pandas as pd # type: ignore
         if self.full_report:
             df = pd.DataFrame(rows, columns=["Time", "Instance", "Cycle", "Operation", "Description", "Received Msgs", "Event", "Retrieved Plans", "Events","Intentions", "Completed Event", "Connected Envs", "Connected Chs", "Beliefs", "Goals"])
         elif self.report:

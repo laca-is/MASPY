@@ -12,7 +12,7 @@ from .communication import (
     askOne, askOneReply, askAll, askAllReply, askHow, 
 )
 from .environment import (
-    Environment, Percept, Action, action
+    Environment, Percept, Action, ActionFailed, action
 )
 
 from .admin import Admin
@@ -29,7 +29,7 @@ __all__ = [
     'askOne','askOneReply', 'askAll', 'askAllReply','askHow',
     'broadcast',
     # Environment
-    'Environment','Percept', 'Action', 'action',
+    'Environment','Percept', 'Action', 'ActionFailed', 'action',
     # Admin
     'Admin',
 ]
